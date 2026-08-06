@@ -25,6 +25,13 @@ export default async function Home() {
             ))}
           </ul>
         )}
+
+        <h2>Integrations</h2>
+        <ul className={styles.tenantList}>
+          <li>
+            <Link href="/xero">Xero connection status</Link>
+          </li>
+        </ul>
       </main>
     </div>
   );
