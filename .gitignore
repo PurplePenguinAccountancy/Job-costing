@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated Office deliverables — local reference copies only, not source
+docs/*.pptx
+docs/*.xlsx

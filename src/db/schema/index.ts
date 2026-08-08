@@ -3,6 +3,7 @@ export * from "./tenants";
 export * from "./users";
 export * from "./memberships";
 export * from "./jobs";
+export * from "./cost-type-accounts";
 export * from "./cost-codes";
 export * from "./budgets";
 export * from "./cost-transactions";

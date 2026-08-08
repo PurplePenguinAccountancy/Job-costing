@@ -6,6 +6,7 @@ import {
   tenantMemberships,
   jobs,
   costCodes,
+  costTypeAccounts,
   budgets,
   costTransactions,
 } from "./schema";
@@ -69,9 +70,20 @@ async function main() {
       })
       .returning();
 
+    // Addendum 2.J: the Xero-facing bucket this cost type rolls up into —
+    // set up once per tenant per cost type, independent of individual cost
+    // codes. "isWayleaveManaged: true" here because no suitable account
+    // existed in the client's COA, so Wayleave created its own.
+    await tx.insert(costTypeAccounts).values({
+      tenantId: tenantA.id,
+      costType: "labour",
+      xeroAccountCode: "320",
+      isWayleaveManaged: false,
+    });
+
     const [costCode] = await tx
       .insert(costCodes)
-      .values({ tenantId: tenantA.id, code: "LABOUR", name: "Direct Labour" })
+      .values({ tenantId: tenantA.id, code: "LABOUR", name: "Direct Labour", costType: "labour" })
       .returning();
 
     // Cost posted directly on the PO node (not a leaf) — proves the "any

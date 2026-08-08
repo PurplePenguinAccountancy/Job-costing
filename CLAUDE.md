@@ -45,7 +45,7 @@ Explicitly excluded from this build: an asset-surveying feature considered earli
 
 **Xero-specific constraints that shape the MVP implementation:**
 
-- **Xero tracking categories are capped at 2 active categories, ~100 options each — and payroll transactions support only 1 category.** This means Xero can never hold the full job hierarchy. This product's own database is the permanent source of truth for the hierarchy; Xero only ever receives a flattened top-level reference (e.g. one job code or a concatenated path) tagged onto each transaction.
+- ~~Xero tracking categories are capped at 2 active categories, ~100 options each — and payroll transactions support only 1 category. This means Xero can never hold the full job hierarchy. This product's own database is the permanent source of truth for the hierarchy; Xero only ever receives a flattened top-level reference (e.g. one job code or a concatenated path) tagged onto each transaction.~~ **Superseded by Addendum 2.A — Xero tracking categories are not used for job identity at all.** This product's own database is the sole source of truth for the hierarchy; Xero receives only aggregate cost-type totals, no job/region reference of any kind.
 - **Xero's Accounting API has a native Attachments endpoint** (GET/POST/PUT) supporting attachments on Invoices, Bills, Purchase Orders, Credit Notes, Bank Transactions, and Manual Journals. Every transaction pushed to Xero must carry its original source document via this endpoint — this is a deliberate differentiator (competing products often push coded totals without the backing document, breaking the audit trail for an HMRC enquiry).
 - Start with a **Xero custom connection** for the pilot (single org, no App Store review needed). Plan for **Xero App Partner review** before onboarding any customer beyond the pilot.
 - Sync cadence: near-real-time is the ideal, but 15-minute-to-hourly batch is acceptable for v1 — don't over-engineer this early.
@@ -192,18 +192,117 @@ Reporting and dashboards (beyond the reconciliation and payroll-gap views in sec
 - **UK-region hosting specifically** (AWS eu-west-2 London or Azure UK South) — not just "EU." Not yet provisioned; local dev only so far.
 - A job queue (BullMQ/Redis or similar) for reconciliation checks, scheduled Xero syncs, and OCR processing — keep these out of the request/response cycle. Not yet built.
 - Object storage (S3-compatible) for documents, tiered: hot storage for recent documents (under ~18 months old), cold/archive storage for older ones, to keep the 6-year UK record-retention requirement affordable. Not yet built.
-- **Branding**: standalone product, does not need to follow Purple Penguin Accountancy branding. Placeholder naming until a name is decided.
+- **Branding**: standalone product, does not need to follow Purple Penguin Accountancy branding. Working name: **Wayleave** (provisional — not yet fully confirmed, but in use throughout the codebase, mockups, and docs).
 
 ---
 
 ## 15. Suggested build order
 
-1. Core data model — job tree, cost codes, transaction types *(in progress)*
-2. Xero integration — auth, bill/attachment creation, tracking category push, reconciliation check
+1. Core data model — job tree, cost codes, transaction types *(done)*
+2. Xero integration — auth *(done)*, bill/attachment creation, cost-type account mapping, reconciliation check *(in progress — see Addendum 2)*
 3. Capture pipeline — email intake, OCR, PO matching, allocation, approval (section 5A)
 4. Labour — time-allocation import, rate calculation, payroll reconciliation view
 5. Milestone billing and the WIP/dashboard views
 6. Pilot with the real client, validate against section 13, iterate
+
+---
+
+## 16. Addendum 2 — decisions from the v1 scoping tracker
+
+Resolved after the core data model and initial Xero auth were built. See `docs/v1-scoping-open-questions.md` and `docs/Wayleave_V1_Scoping_Tracker.xlsx` for the full original question set — this section is the condensed, decided outcome of that tracker, folded in as the permanent record per that doc's own instructions.
+
+### 2.A Xero posting model — no tracking categories, aggregate cost-type totals only
+
+**Decided:** Xero tracking categories are not used for job identity at all — not even a flattened top-level reference. Every transaction posts to the client's own Cost of Sales nominal account **by cost type** (materials / labour / subcontractor / plant) as an aggregate figure only. Wayleave holds the complete job-level breakdown internally; Xero never sees it, at any level, including top-level.
+
+**Why**: removes every Xero-side constraint (2-category cap, ~100-option cap, 1-category-on-payroll limit) from the design entirely, rather than designing around them.
+
+**Trade-off accepted**: Xero itself shows zero job/region-level detail. Anyone needing that view must use Wayleave, not Xero reports.
+
+**Requires**: each client's Xero COA needs proper Cost of Sales sub-account granularity by cost type. Wayleave needs a *configurable* mapping to each client's actual account structure — never a fixed assumed set of account codes.
+
+### 2.B Cost code model — granular internally, rolls up to few Xero accounts
+
+**Decided:** cost codes stay rich and client-configurable internally (per section 3 — this did not change). Each cost code additionally carries a **cost type** (materials / labour / subcontractor / plant) and maps many-to-one onto one of the client's Xero Cost of Sales accounts for that type. The cost code itself is the fine-grained internal unit; the cost type + Xero account is the coarse Xero-facing bucket it rolls up into.
+
+### 2.C Reconciliation — account-level, by cost type
+
+Following directly from 2.A/2.B: for every cost-type account in use, Wayleave's summed job-costing total (across all jobs, for that cost type) must equal the Xero GL balance for that account. This is coarser than job-level reconciliation — by design, since Xero has no job-level data to reconcile against. Errors surface per-account: which cost-type accounts reconcile and which don't, catching non-standard or client-modified charts of accounts.
+
+### 2.D Xero contact matching
+
+- **Sales invoices**: matched to the existing Xero Customer.
+- **Suppliers/subcontractors**: matched to an existing Xero contact where one exists. If no matching supplier exists in Xero, flag it and push the supplier name into Xero to create the contact, so a bill/cost can be raised against it and matched to the bank feed — Hubdoc-like behaviour.
+
+### 2.E VAT / CIS on synced bills
+
+- **VAT**: tax rate taxonomy mirrors Xero's own; user selects a default tax rate per customer/supplier (overridable per invoice), Hubdoc-style.
+- **CIS**: **Wayleave does not calculate CIS.** Bills are coded and pushed to Xero at gross; Xero's own CIS engine (verification, deduction, returns) handles CIS entirely — consistent with treating Xero as the CIS source of truth (section on capture pipeline / CIS). No CIS-specific logic needed in Wayleave for v1 beyond passing the transaction through.
+
+### 2.F Sync cadence
+
+15-minute batch is acceptable for v1; instant/near-real-time is the long-term ideal, not a v1 requirement. No job queue infrastructure (Redis/BullMQ) needed yet — a scheduled function is sufficient at pilot scale.
+
+### 2.G OCR / email intake (provisional, pending pilot data)
+
+- **OCR**: Azure Document Intelligence (prebuilt invoice model), provisionally — believed to have better line-item extraction accuracy than AWS Textract AnalyzeExpense for this document type, though pricing is equivalent. **Not yet confirmed** — needs 20–30 real pilot-client invoices run through both APIs before fully committing. Does not require Azure hosting; called as a standalone API regardless of hosting target.
+- **Email intake**: AWS SES (ties to the AWS hosting decision, 2.J) — receiving rule → S3 → Lambda → OCR provider. If hosting ever moves to Azure, revisit with Azure Communication Services or Mailgun instead.
+- **PO matching**: exact match only for v1 (post-normalisation — strip whitespace/dashes/leading zeros, case-insensitive). No fuzzy auto-linking for PO identity, ever — a confident-but-wrong fuzzy match would misallocate cost while keeping totals balanced, which reconciliation can't catch. Fuzzy matching, when added later, produces a suggestion for human confirmation, never an auto-link.
+- **Failed/ambiguous extraction**: always shown in the review UI alongside the source document (never a data table without the document visible). Three states — low-confidence (flagged fields), extraction-succeeded-but-possibly-wrong (document shown for visual check), extraction-failed (blank form, document attached, full manual entry) — all three enter the same review queue, nothing silently drops. Every human correction is logged against the original OCR output (feeds the AI cost-code-suggestion groundwork already noted as phase 2).
+
+### 2.H Shared split-allocation component — data shape
+
+A generic `allocation_lines` table, reused across subcontractor invoices, direct payments, and material/stock allocation:
+
+- `source_line_reference` — the specific invoice/document *line*, not the parent transaction, so a multi-line document can split different lines to different jobs independently. (Confirm against real pilot invoices whether multi-line splitting actually comes up.)
+- `cost_object_id` — the job/hierarchy node the cost allocates to, at any level.
+- `allocation_type` — `percentage | fixed_amount | time_based`. Time-based: client enters hours per job, system derives the percentage split.
+- `value` — the entered percentage, amount, or hours, per `allocation_type`.
+- `expected_total_hours` — required only for time-based, captured from the source document. Entered hours validate against this expected total (not their own running sum), so a half-finished allocation can't silently pass as complete.
+
+**Validation**: allocations on a given source line must sum to exactly 100% / the full fixed amount / the full expected hours before that line counts as allocated — enforced at the application level at minimum, ideally also a DB constraint. No partial splits ever count as done.
+
+**Defaults**: client sets a default allocation method **per context** (subcontractor / direct payment / stock), not one tenant-wide default — still overridable per instance. Changing a default only affects new allocations going forward, never retroactively restates existing ones.
+
+Milestone billing (2.K) reuses this same `allocation_type` convention (percentage | fixed_amount) rather than inventing a second way to express the same idea.
+
+### 2.I Labour / employee rates
+
+- `employees` (tenant-scoped) + `employee_rates` with an effective-from date **and** a `rate_type` (`actual | standard`) — both must coexist per section 8, since actual payroll totals must still be captured even for standard-costing clients, to compute the variance.
+- Backdated rate changes never silently restate already-posted months — require an explicit correction instead.
+- **Open**: how rates themselves get entered/updated (manual admin entry vs. a second import) — separate mechanism from the hours import below. Not yet resolved.
+- **Import template columns** (provisional, pending the pilot's actual payroll extract format): `employee_identifier`, `cost_object_id`, `date`, `hours` (or `days`), `day_type`. Whether `day_type` carries a pay multiplier (overtime, bank holiday) is undecided and depends on whatever the pilot's real extract turns out to need.
+
+### 2.J Variance account mapping
+
+Wayleave creates default Cost of Sales accounts per cost type (Materials, Labour, Subcontractor, Labour Rate Variance) during setup — checking first whether a suitable account already exists in the client's COA and offering to map to it, only creating new when nothing suitable is found. All Wayleave-managed accounts are flagged as such (e.g. "Labour COS — Wayleave managed"); any unexpected movement in one that didn't originate from Wayleave is itself a reconciliation flag. Reconciliation drills down by supplier (Materials) and by person (Labour), not only by job. Same pattern extends to Subcontractor COS and future Plant COS.
+
+### 2.K Milestone schema
+
+Milestones table scoped to the lowest-level job: sequence/order, name, `allocation_type` (percentage | fixed_amount) + value (reusing 2.H's convention), status `pending → complete → billed`. Payment status is **not** duplicated in this table — link to the Xero invoice created on billing and query Xero for payment state, rather than tracking a parallel copy that can drift. Sum of all milestones for a job must equal exactly 100% / the full contract value. **Strict sequential completion is enforced by default for v1** (can't invoice a later milestone before an earlier one) — can be relaxed later if a contract genuinely needs it, via an explicit per-job flag.
+
+### 2.L GP margin alert threshold
+
+Client-configurable, not hardcoded — no universal correct number. Alert when (budgeted margin %) minus (current margin %, from committed + actual cost against budgeted/contract value) exceeds a client-set tolerance. Suggested starting default: **5 percentage points** (a starting point for discussion, not a researched figure). Must use committed + actual (not actual alone) to function as an early warning rather than a post-invoice discovery.
+
+### 2.M Authentication and roles
+
+Auth.js (NextAuth), email magic-link for MVP. Authorization supports four access patterns:
+
+- **Tenant-wide Editor** — sees/acts on everything in the tenant.
+- **Tenant-wide Viewer** — read-only, everything.
+- **Project-scoped Manager** (Mid/Premium) — hierarchy-branch-scoped, per Addendum 1.B.
+- **Cross-tenant Accountant** — one login can belong to multiple client tenants (many-to-many user↔tenant, role scoped per membership, license allocated per client tenant not per accountant — mirrors Xero's own adviser-access pattern). **Decided**: narrower than full Editor — broad read access plus reconciliation/journal rights, but cannot restructure a client's job hierarchy. Mirrors how an external accountant typically operates inside a client's own Xero.
+
+### 2.N Hosting and infrastructure
+
+- **AWS, eu-west-2 (London)** — fresh billing/infra account under Wayleave specifically, separate from any Purple Penguin Accountancy accounts.
+- **Object storage**: S3, tiered per the brief (Standard <18 months, Glacier Deep Archive beyond). If OCR ends up on Azure (2.G), documents cross the cloud boundary per OCR call (S3 → Azure → back) — negligible cost at pilot volume, but a known behaviour, not an oversight.
+- **Secrets**: `.env` is correct for the single dev-level Xero connection today. Once a second tenant connects their own Xero org, move to AWS Secrets Manager or KMS-based per-tenant encryption — not a home-rolled encrypted column. Note this is a **token-refresh lifecycle**, not static secret storage: Xero's access token is short-lived and each refresh invalidates the prior refresh token, so the design needs a correct refresh-and-store cycle per tenant, not one-time encrypted storage.
+
+### 2.O Testing strategy
+
+Focused unit/integration tests on the money-math logic; no full end-to-end UI coverage required for v1. Cover specifically: allocation splitting (all three `allocation_type`s), reconciliation comparison, labour standard-costing variance, hierarchy roll-up at any depth, milestone billing sums. Needs an explicit, tested rounding rule (remainder allocation) — a naive percentage split will not sum back to the source total. Property-based testing (e.g. fast-check) for the allocation/reconciliation invariants specifically, not just example-based cases. Separate, less-frequent Xero sandbox integration tests for sync/attachment/auto-account-creation — mocked responses can't catch Xero's real API behaving differently than assumed.
 
 ---
 

@@ -1,0 +1,1065 @@
+{
+  "id": "34ebddef-b2df-48e4-acab-c57bbab9137c",
+  "prevId": "dec02b35-024c-4146-bf47-dcdb61dd02ee",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.tenants": {
+      "name": "tenants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tenant_memberships": {
+      "name": "tenant_memberships",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "membership_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tenant_memberships_tenant_id_tenants_id_fk": {
+          "name": "tenant_memberships_tenant_id_tenants_id_fk",
+          "tableFrom": "tenant_memberships",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tenant_memberships_user_id_users_id_fk": {
+          "name": "tenant_memberships_user_id_users_id_fk",
+          "tableFrom": "tenant_memberships",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_memberships_tenant_user_unique": {
+          "name": "tenant_memberships_tenant_user_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "user_id"
+          ]
+        }
+      },
+      "policies": {
+        "memberships_visible_to_self_or_within_tenant": {
+          "name": "memberships_visible_to_self_or_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "app_user"
+          ],
+          "using": "\n        \"tenant_memberships\".\"user_id\" = current_setting('app.current_user_id', true)::uuid\n        or \"tenant_memberships\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid\n      "
+        },
+        "memberships_write_within_tenant": {
+          "name": "memberships_write_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "app_user"
+          ],
+          "withCheck": "\"tenant_memberships\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "memberships_update_within_tenant": {
+          "name": "memberships_update_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"tenant_memberships\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid",
+          "withCheck": "\"tenant_memberships\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "memberships_delete_within_tenant": {
+          "name": "memberships_delete_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"tenant_memberships\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.jobs": {
+      "name": "jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "jobs_tenant_id_tenants_id_fk": {
+          "name": "jobs_tenant_id_tenants_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "jobs_parent_id_jobs_id_fk": {
+          "name": "jobs_parent_id_jobs_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "jobs_owner_id_users_id_fk": {
+          "name": "jobs_owner_id_users_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "jobs_tenant_code_unique": {
+          "name": "jobs_tenant_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "code"
+          ]
+        }
+      },
+      "policies": {
+        "jobs_select_within_tenant": {
+          "name": "jobs_select_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"jobs\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "jobs_insert_within_tenant": {
+          "name": "jobs_insert_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "app_user"
+          ],
+          "withCheck": "\"jobs\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "jobs_update_within_tenant": {
+          "name": "jobs_update_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"jobs\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid",
+          "withCheck": "\"jobs\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "jobs_delete_within_tenant": {
+          "name": "jobs_delete_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"jobs\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.cost_type_accounts": {
+      "name": "cost_type_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_type": {
+          "name": "cost_type",
+          "type": "cost_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "xero_account_code": {
+          "name": "xero_account_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "xero_account_id": {
+          "name": "xero_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_wayleave_managed": {
+          "name": "is_wayleave_managed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cost_type_accounts_tenant_id_tenants_id_fk": {
+          "name": "cost_type_accounts_tenant_id_tenants_id_fk",
+          "tableFrom": "cost_type_accounts",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cost_type_accounts_tenant_type_unique": {
+          "name": "cost_type_accounts_tenant_type_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "cost_type"
+          ]
+        }
+      },
+      "policies": {
+        "cost_type_accounts_select_within_tenant": {
+          "name": "cost_type_accounts_select_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_type_accounts\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_type_accounts_insert_within_tenant": {
+          "name": "cost_type_accounts_insert_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "app_user"
+          ],
+          "withCheck": "\"cost_type_accounts\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_type_accounts_update_within_tenant": {
+          "name": "cost_type_accounts_update_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_type_accounts\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid",
+          "withCheck": "\"cost_type_accounts\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_type_accounts_delete_within_tenant": {
+          "name": "cost_type_accounts_delete_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_type_accounts\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.cost_codes": {
+      "name": "cost_codes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_type": {
+          "name": "cost_type",
+          "type": "cost_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cost_codes_tenant_id_tenants_id_fk": {
+          "name": "cost_codes_tenant_id_tenants_id_fk",
+          "tableFrom": "cost_codes",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cost_codes_tenant_code_unique": {
+          "name": "cost_codes_tenant_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "code"
+          ]
+        }
+      },
+      "policies": {
+        "cost_codes_select_within_tenant": {
+          "name": "cost_codes_select_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_codes\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_codes_insert_within_tenant": {
+          "name": "cost_codes_insert_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "app_user"
+          ],
+          "withCheck": "\"cost_codes\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_codes_update_within_tenant": {
+          "name": "cost_codes_update_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_codes\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid",
+          "withCheck": "\"cost_codes\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_codes_delete_within_tenant": {
+          "name": "cost_codes_delete_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_codes\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.budgets": {
+      "name": "budgets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_code_id": {
+          "name": "cost_code_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "budget_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "budgets_tenant_id_tenants_id_fk": {
+          "name": "budgets_tenant_id_tenants_id_fk",
+          "tableFrom": "budgets",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "budgets_job_id_jobs_id_fk": {
+          "name": "budgets_job_id_jobs_id_fk",
+          "tableFrom": "budgets",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "budgets_cost_code_id_cost_codes_id_fk": {
+          "name": "budgets_cost_code_id_cost_codes_id_fk",
+          "tableFrom": "budgets",
+          "tableTo": "cost_codes",
+          "columnsFrom": [
+            "cost_code_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "budgets_select_within_tenant": {
+          "name": "budgets_select_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"budgets\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "budgets_insert_within_tenant": {
+          "name": "budgets_insert_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "app_user"
+          ],
+          "withCheck": "\"budgets\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "budgets_update_within_tenant": {
+          "name": "budgets_update_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"budgets\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid",
+          "withCheck": "\"budgets\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "budgets_delete_within_tenant": {
+          "name": "budgets_delete_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"budgets\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.cost_transactions": {
+      "name": "cost_transactions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_code_id": {
+          "name": "cost_code_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "cost_transaction_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approval_status": {
+          "name": "approval_status",
+          "type": "cost_transaction_approval_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "source_type": {
+          "name": "source_type",
+          "type": "cost_transaction_source_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_reference": {
+          "name": "source_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "xero_reference": {
+          "name": "xero_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transaction_date": {
+          "name": "transaction_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cost_transactions_tenant_id_tenants_id_fk": {
+          "name": "cost_transactions_tenant_id_tenants_id_fk",
+          "tableFrom": "cost_transactions",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cost_transactions_job_id_jobs_id_fk": {
+          "name": "cost_transactions_job_id_jobs_id_fk",
+          "tableFrom": "cost_transactions",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "cost_transactions_cost_code_id_cost_codes_id_fk": {
+          "name": "cost_transactions_cost_code_id_cost_codes_id_fk",
+          "tableFrom": "cost_transactions",
+          "tableTo": "cost_codes",
+          "columnsFrom": [
+            "cost_code_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "cost_transactions_created_by_users_id_fk": {
+          "name": "cost_transactions_created_by_users_id_fk",
+          "tableFrom": "cost_transactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "cost_transactions_approved_by_users_id_fk": {
+          "name": "cost_transactions_approved_by_users_id_fk",
+          "tableFrom": "cost_transactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "approved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "cost_transactions_select_within_tenant": {
+          "name": "cost_transactions_select_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_transactions\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_transactions_insert_within_tenant": {
+          "name": "cost_transactions_insert_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "app_user"
+          ],
+          "withCheck": "\"cost_transactions\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_transactions_update_within_tenant": {
+          "name": "cost_transactions_update_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_transactions\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid",
+          "withCheck": "\"cost_transactions\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        },
+        "cost_transactions_delete_within_tenant": {
+          "name": "cost_transactions_delete_within_tenant",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "app_user"
+          ],
+          "using": "\"cost_transactions\".\"tenant_id\" = current_setting('app.current_tenant_id', true)::uuid"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    }
+  },
+  "enums": {
+    "public.membership_role": {
+      "name": "membership_role",
+      "schema": "public",
+      "values": [
+        "editor",
+        "viewer"
+      ]
+    },
+    "public.cost_type": {
+      "name": "cost_type",
+      "schema": "public",
+      "values": [
+        "materials",
+        "labour",
+        "subcontractor",
+        "plant"
+      ]
+    },
+    "public.budget_source": {
+      "name": "budget_source",
+      "schema": "public",
+      "values": [
+        "manual",
+        "quote_conversion",
+        "import"
+      ]
+    },
+    "public.cost_transaction_approval_status": {
+      "name": "cost_transaction_approval_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "pending_approval",
+        "approved",
+        "posted"
+      ]
+    },
+    "public.cost_transaction_source_type": {
+      "name": "cost_transaction_source_type",
+      "schema": "public",
+      "values": [
+        "bill",
+        "bank_transaction",
+        "manual_journal",
+        "subcontractor_invoice",
+        "labour_allocation",
+        "other"
+      ]
+    },
+    "public.cost_transaction_type": {
+      "name": "cost_transaction_type",
+      "schema": "public",
+      "values": [
+        "committed",
+        "actual"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {
+    "app_user": {
+      "name": "app_user",
+      "createDb": false,
+      "createRole": false,
+      "inherit": true
+    }
+  },
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

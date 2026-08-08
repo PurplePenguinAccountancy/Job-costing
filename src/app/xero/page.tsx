@@ -7,11 +7,11 @@ export default async function XeroStatusPage() {
 
   let error: string | null = null;
   let org: Awaited<ReturnType<typeof adapter.getOrganisation>> | null = null;
-  let categories: Awaited<ReturnType<typeof adapter.listTrackingCategories>> = [];
+  let accounts: Awaited<ReturnType<typeof adapter.listCostOfSalesAccounts>> = [];
 
   try {
     org = await adapter.getOrganisation();
-    categories = await adapter.listTrackingCategories();
+    accounts = await adapter.listCostOfSalesAccounts();
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }
@@ -37,31 +37,29 @@ export default async function XeroStatusPage() {
             <span>{org?.baseCurrency}</span>
           </div>
 
-          <h2>Tracking categories</h2>
+          <h2>Cost of Sales accounts</h2>
           <p className={styles.hint}>
-            Xero allows at most {adapter.capabilities.maxTrackingCategories} active categories
-            with ~{adapter.capabilities.maxOptionsPerTrackingCategory} options each — this is
-            where a flattened job reference gets tagged onto each transaction. The full job
-            hierarchy always stays in this product&apos;s own database.
+            No tracking categories, no per-job reference of any kind (Addendum 2.A) — every
+            transaction posts to one of these accounts by cost type (materials / labour /
+            subcontractor / plant) as an aggregate figure only. The full job-level breakdown
+            always stays in this product&apos;s own database; reconciliation compares Wayleave&apos;s
+            summed total per cost type against the matching account&apos;s Xero GL balance.
           </p>
-          {categories.length === 0 ? (
+          {accounts.length === 0 ? (
             <p className={styles.empty}>
-              No tracking categories exist in this Xero org yet. Create one in Xero (Settings →
-              Tracking categories) — e.g. named &quot;Job&quot; — before job codes can sync across.
+              No Direct Costs accounts found in this Xero org&apos;s chart of accounts. During
+              tenant setup, Wayleave checks for a suitable existing account per cost type and
+              offers to map to it — only creating a new (Wayleave-managed) one when nothing
+              suitable exists.
             </p>
           ) : (
             <ul className={styles.categoryList}>
-              {categories.map((c) => (
-                <li key={c.id}>
-                  <strong>{c.name}</strong>
-                  <span className={styles.optionCount}>{c.options.length} options</span>
-                  {c.options.length > 0 && (
-                    <ul className={styles.optionList}>
-                      {c.options.map((o) => (
-                        <li key={o.id}>{o.name}</li>
-                      ))}
-                    </ul>
-                  )}
+              {accounts.map((a) => (
+                <li key={a.id}>
+                  <strong>
+                    {a.code} — {a.name}
+                  </strong>
+                  <span className={styles.optionCount}>{a.type}</span>
                 </li>
               ))}
             </ul>

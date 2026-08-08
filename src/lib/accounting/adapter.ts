@@ -6,10 +6,18 @@
  * fewer job-costing hooks than Xero or Dynamics. Every method here must
  * stay generic enough that a new adapter can implement it without this
  * interface changing shape.
+ *
+ * Addendum 2.A: this product does not use tracking categories (or any
+ * platform-equivalent) for job identity — job/region detail never leaves
+ * this product's own database. Every transaction posts to the client's
+ * chart of accounts by cost TYPE only (materials/labour/subcontractor/
+ * plant), as an aggregate figure. That's what the chart-of-accounts methods
+ * below exist for: finding or creating the Cost of Sales account each cost
+ * type rolls up into, per tenant.
  */
 
 export type AccountingCapability =
-  | "trackingCategories"
+  | "chartOfAccounts"
   | "attachments"
   | "manualJournals"
   | "profitAndLossReport"
@@ -18,21 +26,15 @@ export type AccountingCapability =
 export type AccountingCapabilities = {
   /** Whether this platform supports each capability at all. */
   supports: Record<AccountingCapability, boolean>;
-  /**
-   * Xero-specific ceilings (2 active categories, ~100 options each, 1 on
-   * payroll transactions) — deliberately optional so a platform with no
-   * such ceiling (or a different one entirely) isn't forced to fake a
-   * number. Callers must treat "undefined" as "no known limit", not zero.
-   */
-  maxTrackingCategories?: number;
-  maxOptionsPerTrackingCategory?: number;
-  maxTrackingCategoriesOnPayrollTransactions?: number;
 };
 
-export type TrackingCategory = {
+export type Account = {
   id: string;
+  code: string;
   name: string;
-  options: { id: string; name: string }[];
+  /** Platform-native type/class string (e.g. Xero's "DIRECTCOSTS") — shown
+   * to the user during setup, not interpreted by this product. */
+  type: string;
 };
 
 export type OrganisationSummary = {
@@ -47,25 +49,18 @@ export interface AccountingAdapter {
   getOrganisation(): Promise<OrganisationSummary>;
 
   /**
-   * This product's own database is the permanent source of truth for the
-   * job hierarchy (brief section 4) — this call only reads whatever
-   * flattened structure the platform itself can hold, e.g. Xero's tracking
-   * categories, never the other way round.
+   * Cost-of-Sales/expense accounts in the client's chart of accounts —
+   * candidates for mapping a Wayleave cost type onto (Addendum 2.B/2.J).
+   * Read-only discovery; mapping itself is a Wayleave-side decision
+   * (cost_type_accounts table), not something this call performs.
    */
-  listTrackingCategories(): Promise<TrackingCategory[]>;
+  listCostOfSalesAccounts(): Promise<Account[]>;
 
   /**
-   * Ensures a tracking option exists for the given flattened job reference
-   * (a job code or concatenated path — the hierarchy never fits inside a
-   * platform's own category structure). Creates the option if missing,
-   * returns the existing one otherwise. Throws if the category itself
-   * doesn't exist yet or is already at the platform's option-count ceiling
-   * — this method deliberately never creates the category itself, since on
-   * Xero that consumes one of only two scarce top-level slots and must be a
-   * deliberate setup choice, not an automatic side effect of allocating cost.
+   * Creates a new Cost of Sales account, used only when setup finds no
+   * suitable existing account for a cost type (Addendum 2.J — Wayleave
+   * creates its own default accounts, flagged as Wayleave-managed, rather
+   * than assuming one already exists).
    */
-  ensureTrackingCategoryOption(
-    categoryName: string,
-    optionName: string,
-  ): Promise<{ categoryId: string; optionId: string }>;
+  createCostOfSalesAccount(input: { code: string; name: string }): Promise<Account>;
 }
