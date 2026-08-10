@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTenantDashboard } from "@/db/queries/dashboard";
+import { getTenantReconciliation } from "@/db/queries/reconciliation";
 import styles from "./dashboard.module.css";
+
+function formatSignedMoney(value: number) {
+  const abs = Math.abs(value).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
+  return value < 0 ? `-${abs}` : abs;
+}
 
 function formatMoney(value: string) {
   const n = Number(value);
@@ -37,12 +43,77 @@ export default async function TenantDashboard({
 
   const { tenantName, jobs, costCodes, transactions } = dashboard;
 
+  let reconciliation: Awaited<ReturnType<typeof getTenantReconciliation>> = [];
+  let reconciliationError: string | null = null;
+  try {
+    reconciliation = await getTenantReconciliation(tenantId);
+  } catch (err) {
+    reconciliationError = err instanceof Error ? err.message : String(err);
+  }
+
+  const problems = reconciliation.filter((r) => r.status !== "balanced");
+
   return (
     <div className={styles.page}>
       <Link href="/" className={styles.back}>
         ← All tenants
       </Link>
       <h1>{tenantName}</h1>
+
+      {/* Addendum 2.C / brief section 5: persistent, un-ignorable — this is
+          the product's entire reason to exist, not a report nobody opens. */}
+      {reconciliationError ? (
+        <div className={`${styles.banner} ${styles.bannerNeutral}`}>
+          <strong>Reconciliation check unavailable</strong>
+          <span>{reconciliationError}</span>
+        </div>
+      ) : reconciliation.length === 0 ? (
+        <div className={`${styles.banner} ${styles.bannerNeutral}`}>
+          <strong>No cost-type accounts mapped yet</strong>
+          <span>Map each cost type to a Xero Cost of Sales account to enable reconciliation.</span>
+        </div>
+      ) : problems.length === 0 ? (
+        <div className={`${styles.banner} ${styles.bannerOk}`}>
+          <strong>✓ Reconciled</strong>
+          <span>Every cost-type account agrees with Xero.</span>
+        </div>
+      ) : (
+        <div className={`${styles.banner} ${styles.bannerFail}`}>
+          <strong>⚠ Reconciliation check failed</strong>
+          <span>
+            {problems.length} of {reconciliation.length} cost-type account
+            {reconciliation.length === 1 ? "" : "s"} disagree{problems.length === 1 ? "s" : ""} with Xero —
+            must be resolved before this period can be closed.
+          </span>
+          <table className={styles.reconTable}>
+            <thead>
+              <tr>
+                <th>Cost type</th>
+                <th>Xero account</th>
+                <th className={styles.num}>Wayleave total</th>
+                <th className={styles.num}>Xero balance</th>
+                <th className={styles.num}>Difference</th>
+              </tr>
+            </thead>
+            <tbody>
+              {problems.map((r) => (
+                <tr key={r.costType}>
+                  <td>{r.costType}</td>
+                  <td>
+                    {r.xeroAccountCode} — {r.xeroAccountName}
+                    {r.status === "config_error" && (
+                      <span className={styles.configError}> (account not found in Xero)</span>
+                    )}
+                  </td>
+                  <td className={styles.num}>{formatSignedMoney(r.wayleaveTotal)}</td>
+                  <td className={styles.num}>{formatSignedMoney(r.xeroBalance)}</td>
+                  <td className={styles.num}>{formatSignedMoney(r.difference)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <section>
         <h2>Job hierarchy</h2>

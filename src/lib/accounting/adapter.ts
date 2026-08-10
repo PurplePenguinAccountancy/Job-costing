@@ -42,6 +42,31 @@ export type OrganisationSummary = {
   baseCurrency: string;
 };
 
+export type Contact = {
+  id: string;
+  name: string;
+};
+
+export type BillLineItem = {
+  description: string;
+  /** Platform account code — not a Wayleave cost code. Callers resolve
+   * cost_type_accounts to this before calling createBill. */
+  accountCode: string;
+  amount: number;
+};
+
+/**
+ * An account's net movement for a period, as reported by the platform's
+ * own books — this is the "Xero side" of the reconciliation comparison in
+ * Addendum 2.C. Positive = net debit (the normal balance for a Cost of
+ * Sales/expense account).
+ */
+export type AccountBalance = {
+  accountId: string;
+  accountName: string;
+  balance: number;
+};
+
 export interface AccountingAdapter {
   readonly platform: "xero" | "quickbooks" | "sage" | "freeagent" | "dynamics";
   readonly capabilities: AccountingCapabilities;
@@ -63,4 +88,46 @@ export interface AccountingAdapter {
    * than assuming one already exists).
    */
   createCostOfSalesAccount(input: { code: string; name: string }): Promise<Account>;
+
+  /**
+   * Every account's YTD net movement, in one call — this is what
+   * reconciliation (Addendum 2.C) compares Wayleave's summed job-costing
+   * total against, per cost-type account. YTD rather than all-time or
+   * calendar-month: the closest available proxy to "this account's activity
+   * so far" without requiring a client-specific reconciliation start date,
+   * which isn't decided yet — revisit once that's chosen.
+   */
+  getAccountBalances(): Promise<AccountBalance[]>;
+
+  /**
+   * Matches by exact name (Addendum 2.D) — the caller decides what "no
+   * match" means for its flow (flag for review vs. auto-create); this
+   * method itself always creates when nothing matches, since bill push
+   * cannot proceed without a contact to bill against.
+   */
+  findOrCreateContact(name: string): Promise<Contact>;
+
+  /**
+   * Posts a fully-coded, already-approved bill (Addendum 1.A — approval
+   * happens in Wayleave before this is ever called, so the bill is created
+   * authorised/posted in Xero, not a draft awaiting a second review there).
+   */
+  createBill(input: {
+    contactId: string;
+    date: string;
+    reference?: string;
+    lineItems: BillLineItem[];
+  }): Promise<{ id: string }>;
+
+  /**
+   * Attaches the original source document to an already-created bill (brief
+   * section 4 — every transaction pushed to Xero must carry its backing
+   * document, the audit-trail differentiator).
+   */
+  attachFileToBill(
+    billId: string,
+    fileName: string,
+    mimeType: string,
+    content: Buffer,
+  ): Promise<void>;
 }
