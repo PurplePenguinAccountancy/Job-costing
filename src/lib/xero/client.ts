@@ -22,8 +22,8 @@ function requireEnv(name: string): string {
   return value;
 }
 
-async function fetchAccessToken(): Promise<string> {
-  if (tokenCache && tokenCache.expiresAt > Date.now() + 30_000) {
+async function fetchAccessToken(forceRefresh = false): Promise<string> {
+  if (!forceRefresh && tokenCache && tokenCache.expiresAt > Date.now() + 30_000) {
     return tokenCache.accessToken;
   }
 
@@ -48,13 +48,40 @@ async function fetchAccessToken(): Promise<string> {
   return tokenCache.accessToken;
 }
 
+/**
+ * Every authenticated Xero call — both the Accounting API and /connections
+ * — goes through here, so token-expiry self-healing lives in exactly one
+ * place. The 30-second buffer in fetchAccessToken isn't a reliable-enough
+ * guard on its own (a token can go stale between that check and the
+ * request reaching Xero — queueing, a slow report endpoint, plain clock
+ * drift, or a token outright revoked server-side after a scope change).
+ * On a 401 that's actually about the token, clear the cache and retry once
+ * with a fresh one rather than surfacing a spurious failure.
+ */
+async function xeroFetch(url: string, init: RequestInit, _isRetry = false): Promise<Response> {
+  const accessToken = await fetchAccessToken(_isRetry);
+  const res = await fetch(url, {
+    ...init,
+    headers: { ...init.headers, Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (res.status === 401 && !_isRetry) {
+    const body = await res.text();
+    if (body.includes("Token") || body.includes("token")) {
+      return xeroFetch(url, init, true);
+    }
+    // Not a token problem — re-synthesize a Response since the body's
+    // already been consumed, so the caller still sees the real failure.
+    return new Response(body, { status: res.status, statusText: res.statusText });
+  }
+
+  return res;
+}
+
 async function getTenantId(): Promise<string> {
   if (tenantCache) return tenantCache.tenantId;
 
-  const accessToken = await fetchAccessToken();
-  const res = await fetch(XERO_CONNECTIONS_URL, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const res = await xeroFetch(XERO_CONNECTIONS_URL, {});
   if (!res.ok) {
     throw new Error(`Xero /connections request failed (${res.status}): ${await res.text()}`);
   }
@@ -79,17 +106,11 @@ export async function getConnectedOrgName(): Promise<string> {
 
 /** Authenticated request against the Xero Accounting API (api.xro/2.0). */
 export async function xeroRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const accessToken = await fetchAccessToken();
   const tenantId = await getTenantId();
 
-  const res = await fetch(`${XERO_API_BASE}${path}`, {
+  const res = await xeroFetch(`${XERO_API_BASE}${path}`, {
     ...init,
-    headers: {
-      ...init.headers,
-      Authorization: `Bearer ${accessToken}`,
-      "Xero-tenant-id": tenantId,
-      Accept: "application/json",
-    },
+    headers: { ...init.headers, "Xero-tenant-id": tenantId, Accept: "application/json" },
   });
 
   if (!res.ok) {

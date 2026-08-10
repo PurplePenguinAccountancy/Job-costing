@@ -128,6 +128,7 @@ export class XeroAdapter implements AccountingAdapter {
   async createBill(input: {
     contactId: string;
     date: string;
+    dueDate?: string;
     reference?: string;
     lineItems: BillLineItem[];
   }): Promise<{ id: string }> {
@@ -140,6 +141,7 @@ export class XeroAdapter implements AccountingAdapter {
             Type: "ACCPAY",
             Contact: { ContactID: input.contactId },
             Date: input.date,
+            DueDate: input.dueDate ?? input.date,
             Reference: input.reference,
             // Addendum 1.A: approval already happened in Wayleave before
             // this is ever called — Xero doesn't need a second draft review.

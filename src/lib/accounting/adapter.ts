@@ -115,6 +115,9 @@ export interface AccountingAdapter {
   createBill(input: {
     contactId: string;
     date: string;
+    /** Defaults to `date` if omitted — Xero requires a due date on any
+     * AUTHORISED bill, but Wayleave doesn't model payment terms yet. */
+    dueDate?: string;
     reference?: string;
     lineItems: BillLineItem[];
   }): Promise<{ id: string }>;
