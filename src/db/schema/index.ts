@@ -6,4 +6,6 @@ export * from "./jobs";
 export * from "./cost-type-accounts";
 export * from "./cost-codes";
 export * from "./budgets";
+export * from "./documents";
+export * from "./purchase-orders";
 export * from "./cost-transactions";

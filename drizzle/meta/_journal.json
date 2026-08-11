@@ -15,6 +15,13 @@
       "when": 1786130076440,
       "tag": "0001_nervous_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786464415789,
+      "tag": "0002_careless_ikaris",
+      "breakpoints": true
     }
   ]
 }

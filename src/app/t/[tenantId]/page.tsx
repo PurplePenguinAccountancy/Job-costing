@@ -58,7 +58,17 @@ export default async function TenantDashboard({
       <Link href="/" className={styles.back}>
         ← All tenants
       </Link>
-      <h1>{tenantName}</h1>
+      <div className={styles.titleRow}>
+        <h1>{tenantName}</h1>
+        <div className={styles.titleActions}>
+          <Link href={`/t/${tenantId}/capture`} className={styles.navLink}>
+            Simulate document
+          </Link>
+          <Link href={`/t/${tenantId}/approvals`} className={styles.navLink}>
+            Approval queue
+          </Link>
+        </div>
+      </div>
 
       {/* Addendum 2.C / brief section 5: persistent, un-ignorable — this is
           the product's entire reason to exist, not a report nobody opens. */}

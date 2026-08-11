@@ -9,8 +9,11 @@ import {
   costTypeAccounts,
   budgets,
   costTransactions,
+  purchaseOrders,
 } from "./schema";
 import { getFullJobTree, getJobAncestors, getJobDescendants } from "./queries/job-tree";
+import { matchPurchaseOrder } from "./queries/po-matching";
+import { normalizePoNumber } from "@/lib/po-number";
 import { eq } from "drizzle-orm";
 
 /**
@@ -96,11 +99,28 @@ async function main() {
       source: "manual",
     });
 
+    // The PO record incoming invoices will match against (brief section 6,
+    // step 3) — a real-world raised purchase order, distinct from the job
+    // node that happens to share a similar code by coincidence.
+    const [purchaseOrder] = await tx
+      .insert(purchaseOrders)
+      .values({
+        tenantId: tenantA.id,
+        jobId: po.id,
+        costCodeId: costCode.id,
+        poNumber: "PO-1042",
+        normalizedPoNumber: normalizePoNumber("PO-1042"),
+        vendorName: "Northline Cabling Ltd",
+        amount: "12000.00",
+      })
+      .returning();
+
     await tx.insert(costTransactions).values([
       {
         tenantId: tenantA.id,
         jobId: po.id,
         costCodeId: costCode.id,
+        purchaseOrderId: purchaseOrder.id,
         type: "committed",
         amount: "12000.00",
         sourceType: "subcontractor_invoice",
@@ -153,7 +173,24 @@ async function main() {
     throw new Error("RLS ISOLATION FAILURE: tenant B could see tenant A's jobs");
   }
 
-  console.log("\nSeed complete. RLS isolation verified.");
+  // PO matching proof: a differently-formatted but equivalent PO number
+  // ("po 1042" vs the stored "PO-1042") must still match — normalisation
+  // strips whitespace/dashes and is case-insensitive.
+  const matched = await matchPurchaseOrder(tenantA.id, "po 1042");
+  console.log(
+    `\nPO match for "po 1042": ${matched ? `found ${matched.poNumber} (${matched.vendorName})` : "NOT FOUND"} (expect found)`,
+  );
+  if (!matched) {
+    throw new Error("PO MATCHING FAILURE: normalised lookup did not find the seeded PO");
+  }
+
+  const unmatched = await matchPurchaseOrder(tenantA.id, "PO-9999");
+  console.log(`PO match for "PO-9999": ${unmatched ? "found (unexpected!)" : "not found"} (expect not found)`);
+  if (unmatched) {
+    throw new Error("PO MATCHING FAILURE: an unrelated PO number matched");
+  }
+
+  console.log("\nSeed complete. RLS isolation and PO matching verified.");
 }
 
 main()

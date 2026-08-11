@@ -12,6 +12,8 @@ import { tenants } from "./tenants";
 import { jobs } from "./jobs";
 import { costCodes } from "./cost-codes";
 import { users } from "./users";
+import { purchaseOrders } from "./purchase-orders";
+import { documents } from "./documents";
 import { tenantIsolationPolicies } from "./rls-helpers";
 
 // Committed (PO raised, not yet invoiced) vs actual (invoiced/paid) — kept
@@ -62,6 +64,16 @@ export const costTransactions = pgTable(
       .references(() => costCodes.id, { onDelete: "restrict" }),
     type: costTransactionType("type").notNull(),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    // The PO this transaction fulfils/relates to, if any — links a
+    // committed transaction to the PO it was raised for, and an actual
+    // transaction to the PO its invoice matched against (3-way match).
+    purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, {
+      onDelete: "set null",
+    }),
+    // The source document backing this transaction (Addendum 1.A/2.G) —
+    // this is what gets pushed as the Xero attachment, replacing any
+    // placeholder content once the capture pipeline actually produces one.
+    documentId: uuid("document_id").references(() => documents.id, { onDelete: "set null" }),
     approvalStatus: costTransactionApprovalStatus("approval_status")
       .notNull()
       .default("draft"),
