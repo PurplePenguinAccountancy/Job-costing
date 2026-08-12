@@ -44,3 +44,7 @@ next-env.d.ts
 # generated Office deliverables — local reference copies only, not source
 docs/*.pptx
 docs/*.xlsx
+
+# local dev stand-in for real object storage (Addendum 2.N) — captured
+# document bytes, never committed
+/.data/

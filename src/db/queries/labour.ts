@@ -150,6 +150,22 @@ export async function upsertLabourSettings(
     payrollClearingAccountCode?: string | null;
   },
 ) {
+  // The payroll clearing account and the two job-costed accounts must be
+  // genuinely separate — the whole reclassification journal is "move money
+  // OUT of clearing INTO labour + variance" (see labour-settings.ts), which
+  // is meaningless (and would double- or zero-count the period) if clearing
+  // IS one of the accounts it's supposedly moving money into.
+  if (input.payrollClearingAccountCode) {
+    const mappings = await getLabourAccountMappings(tenantId);
+    const collision = mappings.find((m) => m.xeroAccountCode === input.payrollClearingAccountCode);
+    if (collision) {
+      const label = collision.costType === "labour" ? "job-costed Direct Labour" : "Labour Rate Variance";
+      throw new Error(
+        `Payroll clearing account can't be the same as the ${label} account (${input.payrollClearingAccountCode}) — the reclassification journal moves money out of clearing into that account, so they must be distinct.`,
+      );
+    }
+  }
+
   await withTenant(tenantId, null, (tx) =>
     tx
       .insert(labourSettings)
@@ -247,6 +263,32 @@ export async function importTimeEntries(
         continue;
       }
 
+      // Same employee, same job, same day already imported — almost always
+      // an accidental re-upload of the same timesheet, not a genuine second
+      // entry (the format has no time-of-day to distinguish two real
+      // entries). Reported as an error, not silently inserted or silently
+      // skipped, same "nothing disappears without being shown" rule as the
+      // document capture pipeline.
+      const [existing] = await tx
+        .select({ id: labourTimeEntries.id })
+        .from(labourTimeEntries)
+        .where(
+          and(
+            eq(labourTimeEntries.tenantId, tenantId),
+            eq(labourTimeEntries.employeeId, employee.id),
+            eq(labourTimeEntries.jobId, job.id),
+            eq(labourTimeEntries.date, row.date),
+          ),
+        );
+      if (existing) {
+        errors.push({
+          line: index + 1,
+          raw: `${row.employeeIdentifier},${row.jobCode},${row.date},${row.hours}`,
+          message: `Already imported: ${row.employeeIdentifier} on ${row.jobCode} for ${row.date} — skipped as a likely duplicate.`,
+        });
+        continue;
+      }
+
       await tx.insert(labourTimeEntries).values({
         tenantId,
         employeeId: employee.id,
@@ -287,6 +329,27 @@ export async function postLabourPeriod(
   if (!settings?.defaultLabourCostCodeId || !settings.defaultVarianceCostCodeId || !settings.overheadJobId) {
     throw new Error(
       "Labour settings incomplete — set a default labour cost code, variance cost code, and overhead job first.",
+    );
+  }
+
+  const periodKey = `${params.periodStart}_${params.periodEnd}`;
+  const varianceKey = `${periodKey}_variance`;
+  const alreadyPosted = await withTenant(tenantId, null, (tx) =>
+    tx
+      .select({ id: costTransactions.id })
+      .from(costTransactions)
+      .where(
+        and(
+          eq(costTransactions.tenantId, tenantId),
+          eq(costTransactions.sourceType, "labour_allocation"),
+          inArray(costTransactions.sourceReference, [periodKey, varianceKey]),
+        ),
+      )
+      .limit(1),
+  );
+  if (alreadyPosted.length > 0) {
+    throw new Error(
+      `Labour period ${params.periodStart} to ${params.periodEnd} has already been posted — refusing to create duplicate transactions. Review the existing entries in the approval queue instead of re-posting.`,
     );
   }
 
@@ -359,7 +422,7 @@ export async function postLabourPeriod(
           amount: round2(cost).toFixed(2),
           approvalStatus: "pending_approval",
           sourceType: "labour_allocation",
-          sourceReference: `${params.periodStart}_${params.periodEnd}`,
+          sourceReference: periodKey,
           transactionDate: params.transactionDate,
         })
         .returning();
@@ -380,7 +443,7 @@ export async function postLabourPeriod(
           amount: variance.toFixed(2),
           approvalStatus: "pending_approval",
           sourceType: "labour_allocation",
-          sourceReference: `${params.periodStart}_${params.periodEnd}_variance`,
+          sourceReference: varianceKey,
           transactionDate: params.transactionDate,
           description: `Labour rate variance: actual payroll £${params.actualPayrollTotal.toFixed(2)} vs standard-allocated £${totalAllocated.toFixed(2)}`,
         })
@@ -403,26 +466,35 @@ export type LabourPeriodSummary = {
 };
 
 /**
- * Groups approved (not yet posted) labour_allocation transactions by
- * period — sourceReference is `${periodStart}_${periodEnd}` for job lines
- * and `${periodStart}_${periodEnd}_variance` for the variance line, so
- * stripping the suffix is enough to group them back into one period.
+ * Groups labour_allocation transactions by period — sourceReference is
+ * `${periodStart}_${periodEnd}` for job lines and
+ * `${periodStart}_${periodEnd}_variance` for the variance line, so
+ * stripping the suffix is enough to group them back into one period. Only
+ * periods where EVERY transaction is approved are returned — a period with
+ * even one still-pending line isn't ready to sync, and syncing just the
+ * approved subset would push a partial (wrong) total to Xero. `posted`
+ * periods are excluded from the base query entirely, so an already-synced
+ * period naturally disappears rather than needing separate filtering.
  */
 export async function getApprovedLabourPeriods(tenantId: string): Promise<LabourPeriodSummary[]> {
   const rows = await withTenant(tenantId, null, (tx) =>
     tx
-      .select({ amount: costTransactions.amount, sourceReference: costTransactions.sourceReference })
+      .select({
+        amount: costTransactions.amount,
+        sourceReference: costTransactions.sourceReference,
+        approvalStatus: costTransactions.approvalStatus,
+      })
       .from(costTransactions)
       .where(
         and(
           eq(costTransactions.tenantId, tenantId),
           eq(costTransactions.sourceType, "labour_allocation"),
-          eq(costTransactions.approvalStatus, "approved"),
+          inArray(costTransactions.approvalStatus, ["draft", "pending_approval", "approved"]),
         ),
       ),
   );
 
-  const periods = new Map<string, LabourPeriodSummary>();
+  const periods = new Map<string, LabourPeriodSummary & { allApproved: boolean }>();
   for (const row of rows) {
     const ref = row.sourceReference ?? "";
     const isVariance = ref.endsWith("_variance");
@@ -431,19 +503,24 @@ export async function getApprovedLabourPeriods(tenantId: string): Promise<Labour
     if (!periodStart || !periodEnd) continue;
 
     if (!periods.has(key)) {
-      periods.set(key, { periodStart, periodEnd, totalAllocated: 0, variance: 0, transactionCount: 0 });
+      periods.set(key, { periodStart, periodEnd, totalAllocated: 0, variance: 0, transactionCount: 0, allApproved: true });
     }
     const summary = periods.get(key)!;
     if (isVariance) summary.variance += Number(row.amount);
     else summary.totalAllocated += Number(row.amount);
     summary.transactionCount++;
+    if (row.approvalStatus !== "approved") summary.allApproved = false;
   }
 
-  return [...periods.values()].map((p) => ({
-    ...p,
-    totalAllocated: round2(p.totalAllocated),
-    variance: round2(p.variance),
-  }));
+  return [...periods.values()]
+    .filter((p) => p.allApproved)
+    .map((p) => ({
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      totalAllocated: round2(p.totalAllocated),
+      variance: round2(p.variance),
+      transactionCount: p.transactionCount,
+    }));
 }
 
 /**
@@ -457,7 +534,7 @@ export async function pushLabourPeriodToXero(
   tenantId: string,
   periodStart: string,
   periodEnd: string,
-): Promise<{ journalId: string; totalAllocated: number; variance: number }> {
+): Promise<{ journalId: string; totalAllocated: number; variance: number; signConventionWarning: string | null }> {
   const periodKey = `${periodStart}_${periodEnd}`;
   const varianceKey = `${periodKey}_variance`;
 
@@ -540,6 +617,18 @@ export async function pushLabourPeriodToXero(
   });
 
   const adapter = new XeroAdapter();
+
+  // Best-effort snapshot before posting, so the sign convention on the
+  // journal lines (never live-tested — the custom connection only had
+  // manualjournals.read scope as of the last check) can be checked against
+  // what actually moved, instead of trusting the implementation blind.
+  let balancesBefore: Awaited<ReturnType<typeof adapter.getAccountBalances>> | null = null;
+  try {
+    balancesBefore = await adapter.getAccountBalances();
+  } catch {
+    // Non-fatal — the check below just gets skipped.
+  }
+
   const journal = await adapter.createManualJournal({
     date: periodEnd,
     narration: `Wayleave labour reclassification: ${periodStart} to ${periodEnd}`,
@@ -561,5 +650,34 @@ export async function pushLabourPeriodToXero(
       ),
   );
 
-  return { journalId: journal.id, totalAllocated, variance };
+  // Confirm the journal actually moved the labour account in the expected
+  // (+totalAllocated) direction, rather than assuming the sign convention
+  // implemented in xero-adapter.ts is correct just because the API call
+  // didn't error — a journal can be perfectly valid (nets to zero) and
+  // still have every line backwards. Diagnostic only: Xero's Trial Balance
+  // report can lag a just-posted journal, so a mismatch is surfaced as a
+  // warning to check manually, never a thrown error — the journal has
+  // already posted by this point regardless.
+  let signConventionWarning: string | null = null;
+  if (balancesBefore) {
+    try {
+      const balancesAfter = await adapter.getAccountBalances();
+      const findBalance = (list: typeof balancesAfter, accountId: string | null) =>
+        accountId ? (list.find((b) => b.accountId === accountId)?.balance ?? null) : null;
+
+      const labourBefore = findBalance(balancesBefore, labourMapping.xeroAccountId);
+      const labourAfter = findBalance(balancesAfter, labourMapping.xeroAccountId);
+      if (labourBefore !== null && labourAfter !== null) {
+        const delta = round2(labourAfter - labourBefore);
+        if (Math.abs(delta - totalAllocated) > 0.5) {
+          signConventionWarning = `Journal posted (id ${journal.id}), but the Direct Labour account moved by £${delta.toFixed(2)} — expected +£${totalAllocated.toFixed(2)}. Check the journal in Xero: the sign convention may be backwards, or the Trial Balance report hasn't caught up yet.`;
+          console.error(`[labour] ${signConventionWarning}`);
+        }
+      }
+    } catch {
+      // Diagnostic only — a failure here must never look like the push failed.
+    }
+  }
+
+  return { journalId: journal.id, totalAllocated, variance, signConventionWarning };
 }

@@ -306,4 +306,19 @@ Focused unit/integration tests on the money-math logic; no full end-to-end UI co
 
 ---
 
+## 17. Build status — gap remediation pass (post Stage-4 review)
+
+A full codebase-vs-brief review after Stage 4 (labour) surfaced several shortcuts taken during earlier build passes. All have since been fixed and live-verified against the Xero Demo Company and local Postgres (see `src/db/seed.ts` for the live proofs — RLS isolation, PO matching, capture pipeline, storage round-trip, duplicate detection, split-allocation rounding, labour posting, idempotency guards, account-collision guard, and the real Xero bill attachment; all pass on a fresh reseed):
+
+- **Real document storage.** `src/lib/storage/` (adapter pattern, mirrors the OCR/accounting adapters) — `ingestDocument` now actually persists uploaded bytes (local filesystem for now, `.data/` gitignored; swap for `S3Adapter` per 2.N once AWS is provisioned) instead of discarding them. `pushToXero` attaches the real retrieved bytes to the Xero bill — no more fabricated placeholder text. Live-verified: pushed a real invoice, fetched it back from Xero, byte-identical content.
+- **Invoice duplicate detection** (explicit requirement, not in the original brief). `ingestDocument` checks every new document against all previously captured ones — processed and still-pending alike — on two signals: same vendor+amount+date, or same PO+amount. A match sets `documents.possibleDuplicateOfDocumentId`, withholds automatic transaction creation regardless of PO match, and routes it into the existing manual-allocation review flow with a visible warning naming the earlier document. Confirming and allocating it manually is the "yes, process anyway" action — no separate UI built for that.
+- **Labour period idempotency.** `postLabourPeriod` refuses to run twice for the same `periodStart_periodEnd` — checks for existing `labour_allocation` transactions with that `sourceReference` before creating anything.
+- **Duplicate time-entry detection.** `importTimeEntries` checks each row against existing entries for the same employee+job+date before inserting, reporting a duplicate as an error rather than silently doubling hours. Backed by a DB unique constraint (`labour_time_entries_employee_job_date_unique`) as defense in depth.
+- **Extraction-status consistency.** A document that matched a PO but has no extracted vendor name is no longer marked `failed` — the PO already carries vendor identity, so it's `needs_review` instead. `failed` is now reserved for extractions with no usable amount at all.
+- **Partial-period display fix.** `getApprovedLabourPeriods` only lists a period as "ready to sync" once every transaction in it is approved — previously it summed just the approved subset, which could show (and let a user push) an incomplete total.
+- **Account-collision guard.** `upsertLabourSettings` rejects a payroll clearing account code that matches the job-costed Direct Labour or Labour Rate Variance account — those must stay genuinely distinct for the reclassification journal to mean anything.
+- **Manual journal sign-convention self-check.** `pushLabourPeriodToXero` snapshots account balances before and after posting and compares the actual delta against the expected job-costed total, logging a loud warning (never a thrown error — the journal has already posted by that point) if they don't match. Diagnostic only, since live testing is still blocked on the Xero custom connection's `accounting.manualjournals` write scope (read-only as of this pass) — genuinely untested until that scope is granted.
+
+---
+
 *This brief reflects decisions made through a series of scoping conversations — treat it as the starting context, not a substitute for asking clarifying questions where something here is ambiguous or where a real implementation choice hasn't been made yet.*

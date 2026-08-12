@@ -178,6 +178,16 @@
   font-weight: 400;
 }
 
+.duplicateWarning {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  margin: 0;
+}
+
 @media (prefers-color-scheme: dark) {
   .navLink {
     background: #172554;
@@ -216,5 +226,10 @@
   .status {
     background: #451a03;
     color: #fcd34d;
+  }
+  .duplicateWarning {
+    background: #450a0a;
+    border-color: #7f1d1d;
+    color: #fca5a5;
   }
 }

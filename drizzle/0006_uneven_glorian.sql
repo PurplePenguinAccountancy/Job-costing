@@ -1,0 +1,3 @@
+ALTER TABLE "documents" ADD COLUMN "possible_duplicate_of_document_id" uuid;--> statement-breakpoint
+ALTER TABLE "documents" ADD CONSTRAINT "documents_possible_duplicate_of_document_id_documents_id_fk" FOREIGN KEY ("possible_duplicate_of_document_id") REFERENCES "public"."documents"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "labour_time_entries" ADD CONSTRAINT "labour_time_entries_employee_job_date_unique" UNIQUE("employee_id","job_id","date");

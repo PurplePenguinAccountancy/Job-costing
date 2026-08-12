@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, timestamp, uuid, numeric, date, text } from "drizzle-orm/pg-core";
+import { pgTable, timestamp, uuid, numeric, date, text, unique } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { employees } from "./employees";
 import { jobs } from "./jobs";
@@ -34,5 +34,13 @@ export const labourTimeEntries = pgTable(
     importBatchId: text("import_batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => tenantIsolationPolicies(table.tenantId, "labour_time_entries"),
+  (table) => [
+    // One row per employee/job/day — a re-import of the same timesheet line
+    // is almost always an accidental duplicate, not a genuine second entry
+    // (importTimeEntries checks this before insert and reports it as an
+    // error; this constraint is the backstop for anything that races past
+    // that check).
+    unique("labour_time_entries_employee_job_date_unique").on(table.employeeId, table.jobId, table.date),
+    ...tenantIsolationPolicies(table.tenantId, "labour_time_entries"),
+  ],
 ).enableRLS();

@@ -12,6 +12,7 @@ import {
 } from "@/db/queries/approvals";
 import { getApprovedLabourPeriods, pushLabourPeriodToXero } from "@/db/queries/labour";
 import { XeroAdapter } from "@/lib/accounting/xero-adapter";
+import { getStorageAdapter } from "@/lib/storage";
 import styles from "./approvals.module.css";
 
 function formatMoney(value: string) {
@@ -76,6 +77,8 @@ export default async function ApprovalsPage({
           transactionDate: costTransactions.transactionDate,
           vendorName: purchaseOrders.vendorName,
           filename: documents.filename,
+          mimeType: documents.mimeType,
+          storageKey: documents.storageKey,
         })
         .from(costTransactions)
         .innerJoin(costCodes, eq(costCodes.id, costTransactions.costCodeId))
@@ -124,12 +127,19 @@ export default async function ApprovalsPage({
         },
       ],
     });
-    await adapter.attachFileToBill(
-      bill.id,
-      row.filename ?? "document.txt",
-      "text/plain",
-      Buffer.from(`Wayleave cost transaction ${row.id} — synced from the approval queue.`),
-    );
+    // Only real, actually-captured source documents get attached — a
+    // transaction with no backing document (e.g. a manual split-allocation
+    // entry) simply gets no attachment, never a fabricated placeholder.
+    if (row.storageKey) {
+      const storage = getStorageAdapter();
+      const content = await storage.retrieve(row.storageKey);
+      await adapter.attachFileToBill(
+        bill.id,
+        row.filename ?? "document",
+        row.mimeType ?? "application/octet-stream",
+        content,
+      );
+    }
 
     await withTenant(tenantId, null, (tx) =>
       tx
@@ -366,6 +376,13 @@ export default async function ApprovalsPage({
                   <strong>{doc.filename}</strong>
                   <span className={styles.status}>{doc.extractionStatus.replace("_", " ")}</span>
                 </div>
+                {doc.possibleDuplicateOfDocumentId ? (
+                  <p className={styles.duplicateWarning}>
+                    Possible duplicate of an earlier document: <strong>{doc.possibleDuplicateOfFilename}</strong> —
+                    same vendor/PO and amount (and date, where matched). Check it isn&apos;t a re-submission of an
+                    invoice already captured before allocating this one.
+                  </p>
+                ) : null}
                 <p className={styles.hint}>
                   Extracted: {doc.extractedVendorName ?? "no vendor"} · PO{" "}
                   {doc.extractedPoNumber ?? "none"} ·{" "}

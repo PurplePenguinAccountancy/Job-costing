@@ -43,6 +43,13 @@
       "when": 1786549348181,
       "tag": "0005_stormy_earthquake",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786555925091,
+      "tag": "0006_uneven_glorian",
+      "breakpoints": true
     }
   ]
 }

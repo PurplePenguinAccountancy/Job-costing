@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, pgEnum, timestamp, uuid, text, numeric, date, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, timestamp, uuid, text, numeric, date, jsonb, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { tenantIsolationPolicies } from "./rls-helpers";
 
@@ -44,6 +44,16 @@ export const documents = pgTable(
     // confidence-based routing at Mid tier (Addendum 1.A); Core tier still
     // reviews everything regardless of this value.
     extractedConfidence: numeric("extracted_confidence", { precision: 4, scale: 3 }),
+    // Set when ingestion finds an earlier document matching on
+    // (vendor+amount+date) or (PO+amount) — an AP duplicate-invoice check,
+    // not an extraction-quality signal. A flagged document never
+    // auto-produces a cost_transaction; it always requires a human to
+    // confirm it isn't a re-submission before allocating it (see
+    // ingestDocument in capture-pipeline.ts).
+    possibleDuplicateOfDocumentId: uuid("possible_duplicate_of_document_id").references(
+      (): AnyPgColumn => documents.id,
+      { onDelete: "set null" },
+    ),
     // Full raw provider response — kept verbatim per the brief's note on
     // logging OCR output alongside the human's final decision, groundwork
     // for the phase-2 AI cost-code-suggestion feature (Addendum 2.G).

@@ -9,9 +9,12 @@ import {
   budgets,
   costTransactions,
   purchaseOrders,
+  documents,
 } from "./schema";
 import { getFullJobTree, getJobAncestors, getJobDescendants } from "./queries/job-tree";
 import { matchPurchaseOrder } from "./queries/po-matching";
+import { ingestDocument } from "./queries/capture-pipeline";
+import { getStorageAdapter } from "@/lib/storage";
 import { validateAllocationBatch, finalizeAllocationBatch } from "./queries/allocations";
 import {
   addEmployee,
@@ -255,6 +258,57 @@ async function main() {
     throw new Error("PO MATCHING FAILURE: an unrelated PO number matched");
   }
 
+  // Capture pipeline proof: ingest a real invoice (real bytes, not a
+  // placeholder) matching PO-1042 — proves ingestDocument end-to-end, and
+  // that the storage adapter round-trips exactly what was written, since
+  // that's what ultimately gets attached to the Xero bill.
+  const invoiceBytes = Buffer.from(
+    "Vendor: Northline Cabling Ltd\nPO: PO-1042\nDate: 2026-08-01\nTotal: 500.00",
+    "utf-8",
+  );
+  const ingestResult = await ingestDocument({
+    tenantId: tenantA.id,
+    filename: "seed-demo-invoice-1.txt",
+    mimeType: "text/plain",
+    fileBuffer: invoiceBytes,
+    receivedVia: "manual_upload",
+  });
+  console.log(
+    `\nDocument capture: matched PO ${ingestResult.matchedPo}, transaction ${ingestResult.costTransactionId ? "created" : "not created"} (expect matched, created)`,
+  );
+  if (!ingestResult.matchedPo || !ingestResult.costTransactionId) {
+    throw new Error("CAPTURE PIPELINE FAILURE: expected the seeded invoice to match PO-1042 and file a transaction");
+  }
+
+  const [storedDoc] = await withTenant(tenantA.id, null, (tx) =>
+    tx.select({ storageKey: documents.storageKey }).from(documents).where(eq(documents.id, ingestResult.documentId)),
+  );
+  const storage = getStorageAdapter();
+  const roundTripped = storedDoc.storageKey ? await storage.retrieve(storedDoc.storageKey) : null;
+  console.log(
+    `Storage round-trip: ${roundTripped?.equals(invoiceBytes) ? "bytes match exactly" : "MISMATCH"} (expect match)`,
+  );
+  if (!roundTripped || !roundTripped.equals(invoiceBytes)) {
+    throw new Error("STORAGE FAILURE: retrieved bytes did not match what was stored");
+  }
+
+  // Duplicate-invoice detection proof: re-submitting the same
+  // vendor+PO+amount must be flagged and withheld from auto-filing, not
+  // silently posted as a second transaction against the same PO.
+  const duplicateResult = await ingestDocument({
+    tenantId: tenantA.id,
+    filename: "seed-demo-invoice-1-resubmitted.txt",
+    mimeType: "text/plain",
+    fileBuffer: invoiceBytes,
+    receivedVia: "manual_upload",
+  });
+  console.log(
+    `Duplicate detection: flagged as duplicate of ${duplicateResult.possibleDuplicateOfDocumentId} (expect ${ingestResult.documentId}), transaction ${duplicateResult.costTransactionId ? "created (unexpected!)" : "withheld"} (expect withheld)`,
+  );
+  if (duplicateResult.possibleDuplicateOfDocumentId !== ingestResult.documentId || duplicateResult.costTransactionId) {
+    throw new Error("DUPLICATE DETECTION FAILURE: re-submitted invoice was not flagged, or still filed a transaction");
+  }
+
   // Split-allocation proof: validate the batch (expect complete, since the
   // three percentages sum to exactly 100), then finalize it and confirm
   // the resulting transaction amounts sum back to the source total exactly
@@ -310,6 +364,29 @@ async function main() {
     payrollClearingAccountCode: "320",
   });
 
+  // Settings-validation proof: the payroll clearing account can't collide
+  // with the job-costed labour account — the reclassification journal is
+  // "move money out of clearing INTO labour + variance," which is
+  // meaningless if clearing IS the labour account.
+  let collisionGuardFired = false;
+  try {
+    await upsertLabourSettings(tenantA.id, {
+      costingMethod: "standard",
+      defaultLabourCostCodeId: result.costCodeId,
+      defaultVarianceCostCodeId: result.varianceCostCodeId,
+      overheadJobId: result.overheadJobId,
+      payrollClearingAccountCode: labourAccount.code,
+    });
+  } catch (err) {
+    collisionGuardFired = err instanceof Error && err.message.includes("can't be the same as");
+  }
+  console.log(
+    `Account-collision guard: ${collisionGuardFired ? "correctly refused" : "DID NOT FIRE"} (expect refused)`,
+  );
+  if (!collisionGuardFired) {
+    throw new Error("SETTINGS VALIDATION FAILURE: colliding payroll clearing account should have been refused");
+  }
+
   const dave = await addEmployee(tenantA.id, { employeeIdentifier: "EMP-001", name: "Dave Fletcher" });
   const priya = await addEmployee(tenantA.id, { employeeIdentifier: "EMP-002", name: "Priya Shah" });
   await addEmployeeRate(tenantA.id, {
@@ -342,6 +419,19 @@ async function main() {
     throw new Error("TIME ENTRY IMPORT FAILURE: expected 3 clean rows");
   }
 
+  // Duplicate time-entry proof: re-importing the identical timesheet must
+  // be reported as duplicates, not silently create a second set of hours —
+  // that would double the labour cost this period allocates.
+  const reImport = await importTimeEntries(tenantA.id, rows, "seed-demo-timesheet-1-again");
+  console.log(
+    `Time entry re-import: ${reImport.created} created, ${reImport.errors.length} duplicate errors (expect 0 created, 3 errors)`,
+  );
+  if (reImport.created !== 0 || reImport.errors.length !== 3) {
+    throw new Error(
+      "TIME ENTRY DUPLICATE DETECTION FAILURE: re-importing identical rows should be fully rejected as duplicates",
+    );
+  }
+
   // Real payroll total for the period, deliberately different from what
   // hours x standard-rate alone would produce — proves the variance
   // mechanism actually reconciles the gap, not just that posting "works."
@@ -365,6 +455,26 @@ async function main() {
     );
   }
 
+  // Idempotency proof: re-posting the same period must be refused, not
+  // silently double the job-costed + variance transactions.
+  let idempotencyGuardFired = false;
+  try {
+    await postLabourPeriod(tenantA.id, {
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-07",
+      actualPayrollTotal,
+      transactionDate: "2026-08-07",
+    });
+  } catch (err) {
+    idempotencyGuardFired = err instanceof Error && err.message.includes("already been posted");
+  }
+  console.log(
+    `Labour idempotency guard: ${idempotencyGuardFired ? "correctly refused re-post" : "DID NOT FIRE"} (expect refused)`,
+  );
+  if (!idempotencyGuardFired) {
+    throw new Error("LABOUR IDEMPOTENCY FAILURE: re-posting the same period should have been refused");
+  }
+
   // Approve the whole period, then push the real reclassification journal
   // to Xero — proves the full loop, not just that the DB-side math works.
   const periodTransactionIds = [...posting.jobTransactionIds, ...(posting.varianceTransactionId ? [posting.varianceTransactionId] : [])];
@@ -379,9 +489,15 @@ async function main() {
   console.log(
     `Labour journal pushed to Xero: ${journal.journalId} (£${journal.totalAllocated.toFixed(2)} job-costed, £${journal.variance.toFixed(2)} variance)`,
   );
+  if (journal.signConventionWarning) {
+    console.warn(`SIGN CONVENTION WARNING: ${journal.signConventionWarning}`);
+  } else {
+    console.log("Sign-convention self-check: Direct Labour account moved in the expected direction.");
+  }
 
   console.log(
-    "\nSeed complete. RLS isolation, PO matching, split-allocation, and labour posting/journal-push all verified.",
+    "\nSeed complete. RLS isolation, PO matching, capture pipeline + duplicate detection, storage round-trip, " +
+      "split-allocation, and labour posting/idempotency/journal-push all verified.",
   );
 }
 

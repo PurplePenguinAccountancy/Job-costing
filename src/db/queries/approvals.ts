@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { withTenant } from "@/db";
 import { costTransactions, jobs, costCodes, documents, purchaseOrders } from "@/db/schema";
 
@@ -94,15 +95,22 @@ export type UnallocatedDocument = {
   extractedInvoiceDate: string | null;
   extractedConfidence: string | null;
   receivedVia: string;
+  possibleDuplicateOfDocumentId: string | null;
+  /** Filename of the earlier document this one possibly duplicates, for
+   * display — null unless possibleDuplicateOfDocumentId is set. */
+  possibleDuplicateOfFilename: string | null;
 };
 
 /**
- * Documents that produced no cost_transaction — no PO match, or no total
- * extracted at all (Addendum 2.G: every outcome still lands somewhere a
- * human can see it, never a silent drop). A human allocates these
- * manually: picks a job and cost code, confirms/corrects the amount.
+ * Documents that produced no cost_transaction — no PO match, nothing usable
+ * extracted, or flagged as a possible duplicate of an earlier document
+ * (Addendum 2.G: every outcome still lands somewhere a human can see it,
+ * never a silent drop). A human allocates these manually: picks a job and
+ * cost code, confirms/corrects the amount — which for a flagged duplicate
+ * doubles as the "yes, process it anyway" confirmation.
  */
 export function getUnallocatedDocuments(tenantId: string): Promise<UnallocatedDocument[]> {
+  const original = alias(documents, "original");
   return withTenant(tenantId, null, (tx) =>
     tx
       .select({
@@ -115,9 +123,12 @@ export function getUnallocatedDocuments(tenantId: string): Promise<UnallocatedDo
         extractedInvoiceDate: documents.extractedInvoiceDate,
         extractedConfidence: documents.extractedConfidence,
         receivedVia: documents.receivedVia,
+        possibleDuplicateOfDocumentId: documents.possibleDuplicateOfDocumentId,
+        possibleDuplicateOfFilename: original.filename,
       })
       .from(documents)
       .leftJoin(costTransactions, eq(costTransactions.documentId, documents.id))
+      .leftJoin(original, eq(original.id, documents.possibleDuplicateOfDocumentId))
       .where(and(eq(documents.tenantId, tenantId), isNull(costTransactions.id)))
       .orderBy(desc(documents.createdAt)),
   );
