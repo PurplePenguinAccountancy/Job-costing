@@ -55,6 +55,14 @@ export type BillLineItem = {
   amount: number;
 };
 
+export type JournalLine = {
+  accountCode: string;
+  /** Signed: positive = debit, negative = credit. All lines across a
+   * journal must net to exactly zero. */
+  amount: number;
+  description?: string;
+};
+
 /**
  * An account's net movement for a period, as reported by the platform's
  * own books — this is the "Xero side" of the reconciliation comparison in
@@ -133,4 +141,16 @@ export interface AccountingAdapter {
     mimeType: string,
     content: Buffer,
   ): Promise<void>;
+
+  /**
+   * Posts a manual journal — used for the labour standard-costing
+   * reclassification (Dr job-costed Direct Labour, Dr/Cr Labour Rate
+   * Variance, Cr the payroll clearing account). Lines must net to zero;
+   * implementations should reject (not silently correct) an unbalanced set.
+   */
+  createManualJournal(input: {
+    date: string;
+    narration: string;
+    lines: JournalLine[];
+  }): Promise<{ id: string }>;
 }

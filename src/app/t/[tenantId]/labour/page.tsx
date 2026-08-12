@@ -7,8 +7,11 @@ import {
   listEmployeeRates,
   addEmployee,
   addEmployeeRate,
+  ensureLabourXeroAccounts,
+  getLabourAccountMappings,
 } from "@/db/queries/labour";
 import { listJobsForAllocation, listCostCodesForAllocation } from "@/db/queries/approvals";
+import { XeroAdapter } from "@/lib/accounting/xero-adapter";
 import styles from "./labour.module.css";
 
 export default async function LabourPage({
@@ -17,13 +20,25 @@ export default async function LabourPage({
   params: Promise<{ tenantId: string }>;
 }) {
   const { tenantId } = await params;
-  const [settings, employees, rates, allJobs, allCostCodes] = await Promise.all([
+  const [settings, employees, rates, allJobs, allCostCodes, mappings] = await Promise.all([
     getLabourSettings(tenantId),
     listEmployees(tenantId),
     listEmployeeRates(tenantId),
     listJobsForAllocation(tenantId),
     listCostCodesForAllocation(tenantId),
+    getLabourAccountMappings(tenantId),
   ]);
+
+  let xeroAccounts: Awaited<ReturnType<XeroAdapter["listCostOfSalesAccounts"]>> = [];
+  let xeroError: string | null = null;
+  try {
+    xeroAccounts = await new XeroAdapter().listCostOfSalesAccounts();
+  } catch (err) {
+    xeroError = err instanceof Error ? err.message : String(err);
+  }
+
+  const labourMapping = mappings.find((m) => m.costType === "labour");
+  const varianceMapping = mappings.find((m) => m.costType === "labour_variance");
 
   async function saveSettings(formData: FormData) {
     "use server";
@@ -32,7 +47,14 @@ export default async function LabourPage({
       defaultLabourCostCodeId: String(formData.get("defaultLabourCostCodeId")),
       defaultVarianceCostCodeId: String(formData.get("defaultVarianceCostCodeId")),
       overheadJobId: String(formData.get("overheadJobId")),
+      payrollClearingAccountCode: String(formData.get("payrollClearingAccountCode") || "") || null,
     });
+    revalidatePath(`/t/${tenantId}/labour`);
+  }
+
+  async function setUpXeroAccounts() {
+    "use server";
+    await ensureLabourXeroAccounts(tenantId);
     revalidatePath(`/t/${tenantId}/labour`);
   }
 
@@ -131,8 +153,52 @@ export default async function LabourPage({
               ))}
             </select>
           </label>
+          <label className={styles.field}>
+            Payroll clearing account{" "}
+            <span className={styles.optional}>(where the payroll provider actually posts)</span>
+            <select name="payrollClearingAccountCode" defaultValue={settings?.payrollClearingAccountCode ?? ""}>
+              <option value="">Not set</option>
+              {xeroAccounts.map((a) => (
+                <option key={a.id} value={a.code}>
+                  {a.code} — {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <button type="submit" className={styles.submit}>
             Save settings
+          </button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Xero accounts</h2>
+        <p className={styles.hint}>
+          The job-costed Direct Labour and Labour Rate Variance accounts are dedicated accounts
+          Wayleave creates itself (Addendum 2.J) — not a generic expense bucket that would mix
+          variance in with unrelated costs. Safe to run again; it only creates what&apos;s missing.
+        </p>
+        {xeroError ? (
+          <p className={styles.statusWarn}>Xero unavailable: {xeroError}</p>
+        ) : (
+          <ul className={styles.mappingList}>
+            <li>
+              Direct Labour (job-costed):{" "}
+              <span className={styles.mono}>
+                {labourMapping ? `${labourMapping.xeroAccountCode} (mapped)` : "not set up yet"}
+              </span>
+            </li>
+            <li>
+              Labour Rate Variance:{" "}
+              <span className={styles.mono}>
+                {varianceMapping ? `${varianceMapping.xeroAccountCode} (mapped)` : "not set up yet"}
+              </span>
+            </li>
+          </ul>
+        )}
+        <form action={setUpXeroAccounts}>
+          <button type="submit" className={styles.addButton}>
+            Set up Xero accounts
           </button>
         </form>
       </section>

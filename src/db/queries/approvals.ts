@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { withTenant } from "@/db";
 import { costTransactions, jobs, costCodes, documents, purchaseOrders } from "@/db/schema";
 
@@ -25,6 +25,7 @@ async function fetchRows(
   tenantId: string,
   statuses: ApprovalStatus[],
   types?: TransactionType[],
+  excludeLabourAllocation = false,
 ): Promise<ApprovalRow[]> {
   return withTenant(tenantId, null, (tx) =>
     tx
@@ -53,6 +54,12 @@ async function fetchRows(
           eq(costTransactions.tenantId, tenantId),
           inArray(costTransactions.approvalStatus, statuses),
           types ? inArray(costTransactions.type, types) : undefined,
+          // labour_allocation has its own "ready to sync" grouping by
+          // period (getApprovedLabourPeriods) — excluded only from the
+          // approved/ready-to-sync query, so it isn't offered a per-row
+          // "Push to Xero" that would just error. Still shows up in the
+          // pending-review queue like everything else before approval.
+          excludeLabourAllocation ? ne(costTransactions.sourceType, "labour_allocation") : undefined,
         ),
       )
       .orderBy(desc(costTransactions.transactionDate)),
@@ -74,7 +81,7 @@ export function getPendingReview(tenantId: string) {
  * the real invoice arrives and creates an `actual` transaction instead.
  */
 export function getApprovedNotPosted(tenantId: string) {
-  return fetchRows(tenantId, ["approved"], ["actual"]);
+  return fetchRows(tenantId, ["approved"], ["actual"], true);
 }
 
 export type UnallocatedDocument = {

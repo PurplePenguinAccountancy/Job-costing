@@ -6,6 +6,7 @@ import type {
   AccountBalance,
   BillLineItem,
   Contact,
+  JournalLine,
   OrganisationSummary,
 } from "./adapter";
 
@@ -33,6 +34,10 @@ type XeroContactsResponse = {
 
 type XeroInvoicesResponse = {
   Invoices: { InvoiceID: string }[];
+};
+
+type XeroManualJournalsResponse = {
+  ManualJournals: { ManualJournalID: string }[];
 };
 
 type XeroReportCell = { Value?: string; Attributes?: { Value: string; Id: string }[] };
@@ -169,5 +174,38 @@ export class XeroAdapter implements AccountingAdapter {
       headers: { "Content-Type": mimeType },
       body: new Uint8Array(content),
     });
+  }
+
+  async createManualJournal(input: {
+    date: string;
+    narration: string;
+    lines: JournalLine[];
+  }): Promise<{ id: string }> {
+    const total = input.lines.reduce((sum, l) => sum + l.amount, 0);
+    if (Math.abs(total) > 0.005) {
+      throw new Error(
+        `Manual journal lines must net to zero — got ${total.toFixed(2)}. Refusing to post an unbalanced journal.`,
+      );
+    }
+
+    const data = await xeroRequest<XeroManualJournalsResponse>("/ManualJournals", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ManualJournals: [
+          {
+            Narration: input.narration,
+            Date: input.date,
+            Status: "POSTED",
+            JournalLines: input.lines.map((l) => ({
+              AccountCode: l.accountCode,
+              LineAmount: l.amount,
+              Description: l.description,
+            })),
+          },
+        ],
+      }),
+    });
+    return { id: data.ManualJournals[0].ManualJournalID };
   }
 }

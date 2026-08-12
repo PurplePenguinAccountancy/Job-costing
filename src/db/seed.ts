@@ -6,7 +6,6 @@ import {
   tenantMemberships,
   jobs,
   costCodes,
-  costTypeAccounts,
   budgets,
   costTransactions,
   purchaseOrders,
@@ -21,10 +20,12 @@ import {
   parseTimeEntryText,
   importTimeEntries,
   postLabourPeriod,
+  ensureLabourXeroAccounts,
+  pushLabourPeriodToXero,
 } from "./queries/labour";
 import { allocationLines } from "./schema";
 import { normalizePoNumber } from "@/lib/po-number";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 /**
  * Seeds one sample tenant with a 3-level job tree (matching the brief's
@@ -83,34 +84,21 @@ async function main() {
       })
       .returning();
 
-    // Addendum 2.J: the Xero-facing bucket this cost type rolls up into —
-    // set up once per tenant per cost type, independent of individual cost
-    // codes. "isWayleaveManaged: true" here because no suitable account
-    // existed in the client's COA, so Wayleave created its own.
-    await tx.insert(costTypeAccounts).values({
-      tenantId: tenantA.id,
-      costType: "labour",
-      xeroAccountCode: "320",
-      isWayleaveManaged: false,
-    });
-
+    // Addendum 2.J: the Xero-facing bucket a cost type rolls up into. The
+    // actual account mapping for labour/labour_variance is set up live,
+    // after this transaction, via ensureLabourXeroAccounts — dedicated
+    // accounts Wayleave creates itself, not a reused generic bucket (see
+    // that function for why: a generic "Direct Expenses" account would mix
+    // labour variance in with unrelated costs).
     const [costCode] = await tx
       .insert(costCodes)
       .values({ tenantId: tenantA.id, code: "LABOUR", name: "Direct Labour", costType: "labour" })
       .returning();
 
-    // Addendum 2.J's fifth account bucket — the target for the labour
-    // standard-costing variance (brief section 8's critical rule).
     const [varianceCostCode] = await tx
       .insert(costCodes)
       .values({ tenantId: tenantA.id, code: "LABOUR-VAR", name: "Labour Rate Variance", costType: "labour_variance" })
       .returning();
-    await tx.insert(costTypeAccounts).values({
-      tenantId: tenantA.id,
-      costType: "labour_variance",
-      xeroAccountCode: "325",
-      isWayleaveManaged: true,
-    });
 
     // The non-project/overhead bucket (brief section 8) — a real job like
     // any other, not a nullable special case.
@@ -303,11 +291,23 @@ async function main() {
   // costing must never be independently calculated — job-allocated cost
   // plus variance must equal the actual payroll total posted to Xero,
   // exactly, every period.
+  //
+  // Live Xero call: finds or creates the two dedicated accounts (Direct
+  // Labour job-costed, Labour Rate Variance) and records the mapping —
+  // real accounts in the Demo Company, not hardcoded placeholder codes.
+  const { labourAccount, varianceAccount } = await ensureLabourXeroAccounts(tenantA.id);
+  console.log(
+    `\nLabour Xero accounts: ${labourAccount.code} (${labourAccount.name}), ${varianceAccount.code} (${varianceAccount.name})`,
+  );
+
   await upsertLabourSettings(tenantA.id, {
     costingMethod: "standard",
     defaultLabourCostCodeId: result.costCodeId,
     defaultVarianceCostCodeId: result.varianceCostCodeId,
     overheadJobId: result.overheadJobId,
+    // Where the payroll provider's own journal actually posts in the Demo
+    // Company — genuinely distinct from labourAccount above.
+    payrollClearingAccountCode: "320",
   });
 
   const dave = await addEmployee(tenantA.id, { employeeIdentifier: "EMP-001", name: "Dave Fletcher" });
@@ -365,8 +365,23 @@ async function main() {
     );
   }
 
+  // Approve the whole period, then push the real reclassification journal
+  // to Xero — proves the full loop, not just that the DB-side math works.
+  const periodTransactionIds = [...posting.jobTransactionIds, ...(posting.varianceTransactionId ? [posting.varianceTransactionId] : [])];
+  await withTenant(tenantA.id, null, (tx) =>
+    tx
+      .update(costTransactions)
+      .set({ approvalStatus: "approved" })
+      .where(and(eq(costTransactions.tenantId, tenantA.id), inArray(costTransactions.id, periodTransactionIds))),
+  );
+
+  const journal = await pushLabourPeriodToXero(tenantA.id, "2026-08-01", "2026-08-07");
   console.log(
-    "\nSeed complete. RLS isolation, PO matching, split-allocation, and labour posting all verified.",
+    `Labour journal pushed to Xero: ${journal.journalId} (£${journal.totalAllocated.toFixed(2)} job-costed, £${journal.variance.toFixed(2)} variance)`,
+  );
+
+  console.log(
+    "\nSeed complete. RLS isolation, PO matching, split-allocation, and labour posting/journal-push all verified.",
   );
 }
 

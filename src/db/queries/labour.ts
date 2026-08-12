@@ -6,11 +6,78 @@ import {
   labourTimeEntries,
   labourSettings,
   costTransactions,
+  costTypeAccounts,
   jobs,
 } from "@/db/schema";
+import { XeroAdapter } from "@/lib/accounting/xero-adapter";
+import type { JournalLine } from "@/lib/accounting/adapter";
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+// Dedicated accounts, per Addendum 2.J — a generic "Direct Expenses"
+// bucket would mix labour variance in with unrelated costs, making it
+// useless for anyone actually trying to read it. These are created (not
+// reused) specifically so the variance and job-costed labour figures are
+// unambiguous in Xero, not just in Wayleave.
+const LABOUR_JOB_COSTED_ACCOUNT = { code: "321", name: "Direct Labour (Job Costed)" };
+const LABOUR_VARIANCE_ACCOUNT = { code: "322", name: "Labour Rate Variance" };
+
+/**
+ * Idempotent setup step: finds or creates the two dedicated Xero accounts
+ * labour posting needs, and records the mapping. Safe to call repeatedly —
+ * only creates an account if one with that exact code doesn't already
+ * exist (Addendum 2.J: check first, create only when nothing suitable is
+ * found).
+ */
+export function getLabourAccountMappings(tenantId: string) {
+  return withTenant(tenantId, null, (tx) =>
+    tx
+      .select()
+      .from(costTypeAccounts)
+      .where(
+        and(
+          eq(costTypeAccounts.tenantId, tenantId),
+          inArray(costTypeAccounts.costType, ["labour", "labour_variance"]),
+        ),
+      ),
+  );
+}
+
+export async function ensureLabourXeroAccounts(tenantId: string) {
+  const adapter = new XeroAdapter();
+  const existing = await adapter.listCostOfSalesAccounts();
+
+  async function ensureAccount(target: { code: string; name: string }) {
+    return existing.find((a) => a.code === target.code) ?? (await adapter.createCostOfSalesAccount(target));
+  }
+
+  const labourAccount = await ensureAccount(LABOUR_JOB_COSTED_ACCOUNT);
+  const varianceAccount = await ensureAccount(LABOUR_VARIANCE_ACCOUNT);
+
+  await withTenant(tenantId, null, async (tx) => {
+    for (const [costType, account] of [
+      ["labour", labourAccount],
+      ["labour_variance", varianceAccount],
+    ] as const) {
+      await tx
+        .insert(costTypeAccounts)
+        .values({
+          tenantId,
+          costType,
+          xeroAccountCode: account.code,
+          xeroAccountId: account.id,
+          isWayleaveManaged: true,
+        })
+        .onConflictDoUpdate({
+          target: [costTypeAccounts.tenantId, costTypeAccounts.costType],
+          set: { xeroAccountCode: account.code, xeroAccountId: account.id, isWayleaveManaged: true },
+        });
+    }
+  });
+
+  return { labourAccount, varianceAccount };
 }
 
 // ---------- Employees & rates ----------
@@ -80,6 +147,7 @@ export async function upsertLabourSettings(
     defaultLabourCostCodeId: string;
     defaultVarianceCostCodeId: string;
     overheadJobId: string;
+    payrollClearingAccountCode?: string | null;
   },
 ) {
   await withTenant(tenantId, null, (tx) =>
@@ -322,4 +390,176 @@ export async function postLabourPeriod(
 
     return { jobTransactionIds, varianceTransactionId, totalAllocated, variance };
   });
+}
+
+// ---------- Pushing a period's reclassification journal to Xero ----------
+
+export type LabourPeriodSummary = {
+  periodStart: string;
+  periodEnd: string;
+  totalAllocated: number;
+  variance: number;
+  transactionCount: number;
+};
+
+/**
+ * Groups approved (not yet posted) labour_allocation transactions by
+ * period — sourceReference is `${periodStart}_${periodEnd}` for job lines
+ * and `${periodStart}_${periodEnd}_variance` for the variance line, so
+ * stripping the suffix is enough to group them back into one period.
+ */
+export async function getApprovedLabourPeriods(tenantId: string): Promise<LabourPeriodSummary[]> {
+  const rows = await withTenant(tenantId, null, (tx) =>
+    tx
+      .select({ amount: costTransactions.amount, sourceReference: costTransactions.sourceReference })
+      .from(costTransactions)
+      .where(
+        and(
+          eq(costTransactions.tenantId, tenantId),
+          eq(costTransactions.sourceType, "labour_allocation"),
+          eq(costTransactions.approvalStatus, "approved"),
+        ),
+      ),
+  );
+
+  const periods = new Map<string, LabourPeriodSummary>();
+  for (const row of rows) {
+    const ref = row.sourceReference ?? "";
+    const isVariance = ref.endsWith("_variance");
+    const key = isVariance ? ref.slice(0, -"_variance".length) : ref;
+    const [periodStart, periodEnd] = key.split("_");
+    if (!periodStart || !periodEnd) continue;
+
+    if (!periods.has(key)) {
+      periods.set(key, { periodStart, periodEnd, totalAllocated: 0, variance: 0, transactionCount: 0 });
+    }
+    const summary = periods.get(key)!;
+    if (isVariance) summary.variance += Number(row.amount);
+    else summary.totalAllocated += Number(row.amount);
+    summary.transactionCount++;
+  }
+
+  return [...periods.values()].map((p) => ({
+    ...p,
+    totalAllocated: round2(p.totalAllocated),
+    variance: round2(p.variance),
+  }));
+}
+
+/**
+ * Posts the reclassification journal for one period (Dr job-costed Direct
+ * Labour, Dr/Cr Labour Rate Variance, Cr the payroll clearing account) and
+ * marks every transaction in that period `posted`. Refuses to run unless
+ * every transaction in the period is already approved — never syncs a
+ * partial period.
+ */
+export async function pushLabourPeriodToXero(
+  tenantId: string,
+  periodStart: string,
+  periodEnd: string,
+): Promise<{ journalId: string; totalAllocated: number; variance: number }> {
+  const periodKey = `${periodStart}_${periodEnd}`;
+  const varianceKey = `${periodKey}_variance`;
+
+  const settings = await getLabourSettings(tenantId);
+  if (!settings?.payrollClearingAccountCode) {
+    throw new Error("Payroll clearing account isn't configured yet — set it in Labour settings first.");
+  }
+
+  const rows = await withTenant(tenantId, null, (tx) =>
+    tx
+      .select({
+        id: costTransactions.id,
+        amount: costTransactions.amount,
+        sourceReference: costTransactions.sourceReference,
+        approvalStatus: costTransactions.approvalStatus,
+      })
+      .from(costTransactions)
+      .where(
+        and(
+          eq(costTransactions.tenantId, tenantId),
+          eq(costTransactions.sourceType, "labour_allocation"),
+          inArray(costTransactions.sourceReference, [periodKey, varianceKey]),
+        ),
+      ),
+  );
+
+  if (rows.length === 0) {
+    throw new Error(`No labour transactions found for period ${periodStart} to ${periodEnd}.`);
+  }
+  const notApproved = rows.filter((r) => r.approvalStatus !== "approved");
+  if (notApproved.length > 0) {
+    throw new Error(
+      `${notApproved.length} transaction(s) in this period aren't approved yet — approve the whole period before syncing.`,
+    );
+  }
+
+  const totalAllocated = round2(
+    rows.filter((r) => r.sourceReference === periodKey).reduce((sum, r) => sum + Number(r.amount), 0),
+  );
+  const variance = round2(
+    rows.filter((r) => r.sourceReference === varianceKey).reduce((sum, r) => sum + Number(r.amount), 0),
+  );
+  const actualPayrollTotal = round2(totalAllocated + variance);
+
+  const mappings = await withTenant(tenantId, null, (tx) =>
+    tx
+      .select()
+      .from(costTypeAccounts)
+      .where(
+        and(
+          eq(costTypeAccounts.tenantId, tenantId),
+          inArray(costTypeAccounts.costType, ["labour", "labour_variance"]),
+        ),
+      ),
+  );
+  const labourMapping = mappings.find((m) => m.costType === "labour");
+  const varianceMapping = mappings.find((m) => m.costType === "labour_variance");
+  if (!labourMapping || !varianceMapping) {
+    throw new Error("Labour or variance Xero account isn't set up yet — run account setup first.");
+  }
+
+  const lines: JournalLine[] = [
+    {
+      accountCode: labourMapping.xeroAccountCode,
+      amount: totalAllocated,
+      description: `Job-costed direct labour, ${periodStart} to ${periodEnd}`,
+    },
+  ];
+  if (Math.abs(variance) >= 0.01) {
+    lines.push({
+      accountCode: varianceMapping.xeroAccountCode,
+      amount: variance,
+      description: `Labour rate variance, ${periodStart} to ${periodEnd}`,
+    });
+  }
+  lines.push({
+    accountCode: settings.payrollClearingAccountCode,
+    amount: -actualPayrollTotal,
+    description: `Reclassified to job-costed labour + variance, ${periodStart} to ${periodEnd}`,
+  });
+
+  const adapter = new XeroAdapter();
+  const journal = await adapter.createManualJournal({
+    date: periodEnd,
+    narration: `Wayleave labour reclassification: ${periodStart} to ${periodEnd}`,
+    lines,
+  });
+
+  await withTenant(tenantId, null, (tx) =>
+    tx
+      .update(costTransactions)
+      .set({ approvalStatus: "posted", xeroReference: journal.id })
+      .where(
+        and(
+          eq(costTransactions.tenantId, tenantId),
+          inArray(
+            costTransactions.id,
+            rows.map((r) => r.id),
+          ),
+        ),
+      ),
+  );
+
+  return { journalId: journal.id, totalAllocated, variance };
 }

@@ -10,6 +10,7 @@ import {
   listJobsForAllocation,
   listCostCodesForAllocation,
 } from "@/db/queries/approvals";
+import { getApprovedLabourPeriods, pushLabourPeriodToXero } from "@/db/queries/labour";
 import { XeroAdapter } from "@/lib/accounting/xero-adapter";
 import styles from "./approvals.module.css";
 
@@ -23,9 +24,10 @@ export default async function ApprovalsPage({
   params: Promise<{ tenantId: string }>;
 }) {
   const { tenantId } = await params;
-  const [pending, approved, unallocated, allJobs, allCostCodes] = await Promise.all([
+  const [pending, approved, labourPeriods, unallocated, allJobs, allCostCodes] = await Promise.all([
     getPendingReview(tenantId),
     getApprovedNotPosted(tenantId),
+    getApprovedLabourPeriods(tenantId),
     getUnallocatedDocuments(tenantId),
     listJobsForAllocation(tenantId),
     listCostCodesForAllocation(tenantId),
@@ -36,38 +38,22 @@ export default async function ApprovalsPage({
   // by itself, approving only moves a row to "approved"; syncing is a
   // separate, explicit action below.
   //
-  // labour_allocation is the one exception: the real payroll total is
-  // already posted to Xero as a single lump sum by the external payroll
-  // provider (brief section 8) — there's no per-job bill to push, so
-  // approving a labour row goes straight to "posted" rather than waiting
-  // on a sync step that doesn't exist for it.
+  // labour_allocation transactions also stop at "approved" here — they
+  // don't sync individually (there's no per-job bill), but a whole
+  // *period's* worth reclassifies into Xero as one manual journal via the
+  // "Labour periods ready to sync" section, once every transaction in that
+  // period is approved.
   async function approveSelected(formData: FormData) {
     "use server";
     const ids = formData.getAll("ids").map(String);
     if (ids.length === 0) return;
 
-    await withTenant(tenantId, null, async (tx) => {
-      const rows = await tx
-        .select({ id: costTransactions.id, sourceType: costTransactions.sourceType })
-        .from(costTransactions)
-        .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, ids)));
-
-      const labourIds = rows.filter((r) => r.sourceType === "labour_allocation").map((r) => r.id);
-      const otherIds = rows.filter((r) => r.sourceType !== "labour_allocation").map((r) => r.id);
-
-      if (otherIds.length > 0) {
-        await tx
-          .update(costTransactions)
-          .set({ approvalStatus: "approved", approvedAt: new Date() })
-          .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, otherIds)));
-      }
-      if (labourIds.length > 0) {
-        await tx
-          .update(costTransactions)
-          .set({ approvalStatus: "posted", approvedAt: new Date() })
-          .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, labourIds)));
-      }
-    });
+    await withTenant(tenantId, null, (tx) =>
+      tx
+        .update(costTransactions)
+        .set({ approvalStatus: "approved", approvedAt: new Date() })
+        .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, ids))),
+    );
     revalidatePath(`/t/${tenantId}/approvals`);
     revalidatePath(`/t/${tenantId}`);
   }
@@ -151,6 +137,19 @@ export default async function ApprovalsPage({
         .set({ approvalStatus: "posted", xeroReference: bill.id })
         .where(eq(costTransactions.id, transactionId)),
     );
+    revalidatePath(`/t/${tenantId}/approvals`);
+    revalidatePath(`/t/${tenantId}`);
+  }
+
+  // One reclassification journal per period (Dr job-costed Direct Labour,
+  // Dr/Cr Labour Rate Variance, Cr the payroll clearing account) — not
+  // per-transaction, since that's how the accounting actually works: the
+  // whole period's allocation is one journal, not N individual bills.
+  async function pushLabourPeriod(formData: FormData) {
+    "use server";
+    const periodStart = String(formData.get("periodStart"));
+    const periodEnd = String(formData.get("periodEnd"));
+    await pushLabourPeriodToXero(tenantId, periodStart, periodEnd);
     revalidatePath(`/t/${tenantId}/approvals`);
     revalidatePath(`/t/${tenantId}`);
   }
@@ -291,6 +290,55 @@ export default async function ApprovalsPage({
                       <input type="hidden" name="transactionId" value={row.id} />
                       <button type="submit" className={styles.syncButton}>
                         Push to Xero
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section>
+        <h2>Labour periods ready to sync ({labourPeriods.length})</h2>
+        <p className={styles.hint}>
+          Payroll already posts to Xero as one lump sum from the external provider — Wayleave
+          reclassifies that same total into job-costed labour + variance with a single manual
+          journal per period, not a bill per transaction.
+        </p>
+        {labourPeriods.length === 0 ? (
+          <p className={styles.empty}>No fully-approved labour periods waiting to sync.</p>
+        ) : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th className={styles.num}>Job-allocated</th>
+                <th className={styles.num}>Variance</th>
+                <th className={styles.num}>Transactions</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {labourPeriods.map((p) => (
+                <tr key={`${p.periodStart}_${p.periodEnd}`}>
+                  <td>
+                    {p.periodStart} → {p.periodEnd}
+                  </td>
+                  <td className={styles.num}>
+                    {p.totalAllocated.toLocaleString("en-GB", { style: "currency", currency: "GBP" })}
+                  </td>
+                  <td className={styles.num}>
+                    {p.variance.toLocaleString("en-GB", { style: "currency", currency: "GBP" })}
+                  </td>
+                  <td className={styles.num}>{p.transactionCount}</td>
+                  <td>
+                    <form action={pushLabourPeriod}>
+                      <input type="hidden" name="periodStart" value={p.periodStart} />
+                      <input type="hidden" name="periodEnd" value={p.periodEnd} />
+                      <button type="submit" className={styles.syncButton}>
+                        Push journal to Xero
                       </button>
                     </form>
                   </td>

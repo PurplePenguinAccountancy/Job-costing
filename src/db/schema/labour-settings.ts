@@ -1,4 +1,4 @@
-import { pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import { pgTable, timestamp, uuid, text } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { costCodes } from "./cost-codes";
 import { jobs } from "./jobs";
@@ -24,6 +24,16 @@ export const labourSettings = pgTable(
       onDelete: "set null",
     }),
     overheadJobId: uuid("overhead_job_id").references(() => jobs.id, { onDelete: "set null" }),
+    // Where the external payroll provider's own journal actually posts raw
+    // payroll cost in Xero — genuinely distinct from the job-costed labour
+    // account above. Wayleave's reclassification journal moves money OUT
+    // of this account into the job-costed + variance accounts, so after
+    // posting it nets to zero for the period. A plain account-code
+    // reference (not a cost_type_accounts mapping) since it isn't a
+    // Wayleave "cost type" — Wayleave never books anything TO it, only
+    // reclassifies away FROM it. Null until confirmed against the pilot
+    // client's real chart of accounts.
+    payrollClearingAccountCode: text("payroll_clearing_account_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -1,0 +1,1 @@
+ALTER TABLE "labour_settings" ADD COLUMN "payroll_clearing_account_code" text;
