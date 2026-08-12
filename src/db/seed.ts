@@ -13,8 +13,10 @@ import {
 } from "./schema";
 import { getFullJobTree, getJobAncestors, getJobDescendants } from "./queries/job-tree";
 import { matchPurchaseOrder } from "./queries/po-matching";
+import { validateAllocationBatch, finalizeAllocationBatch } from "./queries/allocations";
+import { allocationLines } from "./schema";
 import { normalizePoNumber } from "@/lib/po-number";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 /**
  * Seeds one sample tenant with a 3-level job tree (matching the brief's
@@ -141,6 +143,45 @@ async function main() {
       },
     ]);
 
+    // Split-allocation proof (Addendum 2.H): a subcontractor invoice line
+    // split 3 ways by percentage, deliberately awkward (33.33/33.33/33.34,
+    // not evenly divisible) to prove the rounding rule — the three
+    // resulting money amounts must sum back to the source total exactly,
+    // not "close enough."
+    const batchRef = "seed-demo-subcontractor-invoice-line-1";
+    await tx.insert(allocationLines).values([
+      {
+        tenantId: tenantA.id,
+        sourceContext: "subcontractor_invoice",
+        sourceLineReference: batchRef,
+        jobId: po.id,
+        costCodeId: costCode.id,
+        allocationType: "percentage",
+        value: "33.33",
+        expectedTotalAmount: "10.00",
+      },
+      {
+        tenantId: tenantA.id,
+        sourceContext: "subcontractor_invoice",
+        sourceLineReference: batchRef,
+        jobId: subsite.id,
+        costCodeId: costCode.id,
+        allocationType: "percentage",
+        value: "33.33",
+        expectedTotalAmount: "10.00",
+      },
+      {
+        tenantId: tenantA.id,
+        sourceContext: "subcontractor_invoice",
+        sourceLineReference: batchRef,
+        jobId: po.id,
+        costCodeId: costCode.id,
+        allocationType: "percentage",
+        value: "33.34",
+        expectedTotalAmount: "10.00",
+      },
+    ]);
+
     const tree = await getFullJobTree(tx, tenantA.id);
     const ancestorsOfSubsite = await getJobAncestors(tx, tenantA.id, subsite.id);
     const descendantsOfRegion = await getJobDescendants(tx, tenantA.id, region.id);
@@ -190,7 +231,39 @@ async function main() {
     throw new Error("PO MATCHING FAILURE: an unrelated PO number matched");
   }
 
-  console.log("\nSeed complete. RLS isolation and PO matching verified.");
+  // Split-allocation proof: validate the batch (expect complete, since the
+  // three percentages sum to exactly 100), then finalize it and confirm
+  // the resulting transaction amounts sum back to the source total exactly
+  // — this is the rounding-rule guarantee, not just "the split happened."
+  const batchRef = "seed-demo-subcontractor-invoice-line-1";
+  const validation = await validateAllocationBatch(tenantA.id, batchRef);
+  console.log(
+    `\nAllocation batch validation: ${validation.sum} of ${validation.expected} allocated across ${validation.lineCount} lines (expect complete)`,
+  );
+  if (!validation.complete) {
+    throw new Error("ALLOCATION VALIDATION FAILURE: batch should be complete but isn't");
+  }
+
+  const createdTransactionIds = await finalizeAllocationBatch(tenantA.id, batchRef, {
+    sourceType: "subcontractor_invoice",
+    transactionDate: "2026-08-05",
+  });
+  const allCreated = await withTenant(tenantA.id, null, (tx) =>
+    tx
+      .select({ amount: costTransactions.amount })
+      .from(costTransactions)
+      .where(inArray(costTransactions.id, createdTransactionIds)),
+  );
+  const amounts = allCreated.map((r) => Number(r.amount));
+  const sumOfCreated = amounts.reduce((a, b) => a + b, 0);
+  console.log(
+    `Allocation amounts: [${amounts.join(", ")}] summing to ${sumOfCreated.toFixed(2)} (expect exactly 10.00, proving the rounding rule)`,
+  );
+  if (Math.abs(sumOfCreated - 10) > 0.001) {
+    throw new Error(`ALLOCATION ROUNDING FAILURE: amounts summed to ${sumOfCreated}, expected exactly 10.00`);
+  }
+
+  console.log("\nSeed complete. RLS isolation, PO matching, and split-allocation verified.");
 }
 
 main()

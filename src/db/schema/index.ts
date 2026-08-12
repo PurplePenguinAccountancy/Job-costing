@@ -9,3 +9,4 @@ export * from "./budgets";
 export * from "./documents";
 export * from "./purchase-orders";
 export * from "./cost-transactions";
+export * from "./allocation-lines";
