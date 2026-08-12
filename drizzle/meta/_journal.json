@@ -29,6 +29,13 @@
       "when": 1786467172719,
       "tag": "0003_abandoned_silhouette",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786540869815,
+      "tag": "0004_closed_frog_thor",
+      "breakpoints": true
     }
   ]
 }

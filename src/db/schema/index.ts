@@ -10,3 +10,7 @@ export * from "./documents";
 export * from "./purchase-orders";
 export * from "./cost-transactions";
 export * from "./allocation-lines";
+export * from "./employees";
+export * from "./employee-rates";
+export * from "./labour-time-entries";
+export * from "./labour-settings";

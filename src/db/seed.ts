@@ -14,6 +14,14 @@ import {
 import { getFullJobTree, getJobAncestors, getJobDescendants } from "./queries/job-tree";
 import { matchPurchaseOrder } from "./queries/po-matching";
 import { validateAllocationBatch, finalizeAllocationBatch } from "./queries/allocations";
+import {
+  addEmployee,
+  addEmployeeRate,
+  upsertLabourSettings,
+  parseTimeEntryText,
+  importTimeEntries,
+  postLabourPeriod,
+} from "./queries/labour";
 import { allocationLines } from "./schema";
 import { normalizePoNumber } from "@/lib/po-number";
 import { eq, inArray } from "drizzle-orm";
@@ -89,6 +97,26 @@ async function main() {
     const [costCode] = await tx
       .insert(costCodes)
       .values({ tenantId: tenantA.id, code: "LABOUR", name: "Direct Labour", costType: "labour" })
+      .returning();
+
+    // Addendum 2.J's fifth account bucket — the target for the labour
+    // standard-costing variance (brief section 8's critical rule).
+    const [varianceCostCode] = await tx
+      .insert(costCodes)
+      .values({ tenantId: tenantA.id, code: "LABOUR-VAR", name: "Labour Rate Variance", costType: "labour_variance" })
+      .returning();
+    await tx.insert(costTypeAccounts).values({
+      tenantId: tenantA.id,
+      costType: "labour_variance",
+      xeroAccountCode: "325",
+      isWayleaveManaged: true,
+    });
+
+    // The non-project/overhead bucket (brief section 8) — a real job like
+    // any other, not a nullable special case.
+    const [overheadJob] = await tx
+      .insert(jobs)
+      .values({ tenantId: tenantA.id, code: "OVERHEAD", name: "Non-project / Overhead" })
       .returning();
 
     // Cost posted directly on the PO node (not a leaf) — proves the "any
@@ -187,7 +215,15 @@ async function main() {
     const descendantsOfRegion = await getJobDescendants(tx, tenantA.id, region.id);
     const jobCount = await tx.select().from(jobs).where(eq(jobs.tenantId, tenantA.id));
 
-    return { tree, ancestorsOfSubsite, descendantsOfRegion, jobCount };
+    return {
+      tree,
+      ancestorsOfSubsite,
+      descendantsOfRegion,
+      jobCount,
+      costCodeId: costCode.id,
+      varianceCostCodeId: varianceCostCode.id,
+      overheadJobId: overheadJob.id,
+    };
   });
 
   console.log("Full job tree (tenant A):");
@@ -199,7 +235,7 @@ async function main() {
   console.log("Descendants of North Region:");
   console.table(result.descendantsOfRegion);
 
-  console.log(`jobs visible with tenant A context set: ${result.jobCount.length} (expect 3)`);
+  console.log(`jobs visible with tenant A context set: ${result.jobCount.length} (expect 4, incl. OVERHEAD)`);
 
   // RLS proof: querying jobs with tenant B's context set must return zero
   // rows for tenant A's jobs, even though they're in the same physical table.
@@ -263,7 +299,75 @@ async function main() {
     throw new Error(`ALLOCATION ROUNDING FAILURE: amounts summed to ${sumOfCreated}, expected exactly 10.00`);
   }
 
-  console.log("\nSeed complete. RLS isolation, PO matching, and split-allocation verified.");
+  // Labour posting proof (brief section 8's critical rule): standard
+  // costing must never be independently calculated — job-allocated cost
+  // plus variance must equal the actual payroll total posted to Xero,
+  // exactly, every period.
+  await upsertLabourSettings(tenantA.id, {
+    costingMethod: "standard",
+    defaultLabourCostCodeId: result.costCodeId,
+    defaultVarianceCostCodeId: result.varianceCostCodeId,
+    overheadJobId: result.overheadJobId,
+  });
+
+  const dave = await addEmployee(tenantA.id, { employeeIdentifier: "EMP-001", name: "Dave Fletcher" });
+  const priya = await addEmployee(tenantA.id, { employeeIdentifier: "EMP-002", name: "Priya Shah" });
+  await addEmployeeRate(tenantA.id, {
+    employeeId: dave.id,
+    rateType: "standard",
+    hourlyRate: "28.50",
+    effectiveFrom: "2026-01-01",
+  });
+  await addEmployeeRate(tenantA.id, {
+    employeeId: priya.id,
+    rateType: "standard",
+    hourlyRate: "24.00",
+    effectiveFrom: "2026-01-01",
+  });
+
+  // The fixed import template (Addendum 2.I) — pasted/uploaded text, not a
+  // flexible column-mapper.
+  const timeSheetText = [
+    "employee_identifier,job_code,date,hours",
+    "EMP-001,PO-1042,2026-08-01,8",
+    "EMP-001,SUBSITE-A,2026-08-02,6",
+    "EMP-002,SUBSITE-A,2026-08-03,8",
+  ].join("\n");
+  const { rows, errors: parseErrors } = parseTimeEntryText(timeSheetText);
+  const importResult = await importTimeEntries(tenantA.id, rows, "seed-demo-timesheet-1");
+  console.log(
+    `\nTime entry import: ${importResult.created} created, ${importResult.errors.length + parseErrors.length} errors (expect 3 created, 0 errors)`,
+  );
+  if (importResult.created !== 3 || importResult.errors.length > 0 || parseErrors.length > 0) {
+    throw new Error("TIME ENTRY IMPORT FAILURE: expected 3 clean rows");
+  }
+
+  // Real payroll total for the period, deliberately different from what
+  // hours x standard-rate alone would produce — proves the variance
+  // mechanism actually reconciles the gap, not just that posting "works."
+  const actualPayrollTotal = 650.0;
+  const posting = await postLabourPeriod(tenantA.id, {
+    periodStart: "2026-08-01",
+    periodEnd: "2026-08-07",
+    actualPayrollTotal,
+    transactionDate: "2026-08-07",
+  });
+  console.log(
+    `Labour posting: £${posting.totalAllocated.toFixed(2)} allocated across ${posting.jobTransactionIds.length} jobs, £${posting.variance.toFixed(2)} variance (expect £591.00 allocated, £59.00 variance)`,
+  );
+  const reconciledTotal = posting.totalAllocated + posting.variance;
+  console.log(
+    `Critical rule check: allocated (${posting.totalAllocated.toFixed(2)}) + variance (${posting.variance.toFixed(2)}) = ${reconciledTotal.toFixed(2)} (expect exactly ${actualPayrollTotal.toFixed(2)})`,
+  );
+  if (Math.abs(reconciledTotal - actualPayrollTotal) > 0.001) {
+    throw new Error(
+      `LABOUR POSTING FAILURE: allocated + variance (${reconciledTotal}) did not equal actual payroll total (${actualPayrollTotal})`,
+    );
+  }
+
+  console.log(
+    "\nSeed complete. RLS isolation, PO matching, split-allocation, and labour posting all verified.",
+  );
 }
 
 main()

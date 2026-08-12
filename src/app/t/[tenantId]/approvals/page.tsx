@@ -35,18 +35,41 @@ export default async function ApprovalsPage({
   // path so this doesn't become a bottleneck — nothing here posts to Xero
   // by itself, approving only moves a row to "approved"; syncing is a
   // separate, explicit action below.
+  //
+  // labour_allocation is the one exception: the real payroll total is
+  // already posted to Xero as a single lump sum by the external payroll
+  // provider (brief section 8) — there's no per-job bill to push, so
+  // approving a labour row goes straight to "posted" rather than waiting
+  // on a sync step that doesn't exist for it.
   async function approveSelected(formData: FormData) {
     "use server";
     const ids = formData.getAll("ids").map(String);
     if (ids.length === 0) return;
 
-    await withTenant(tenantId, null, (tx) =>
-      tx
-        .update(costTransactions)
-        .set({ approvalStatus: "approved", approvedAt: new Date() })
-        .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, ids))),
-    );
+    await withTenant(tenantId, null, async (tx) => {
+      const rows = await tx
+        .select({ id: costTransactions.id, sourceType: costTransactions.sourceType })
+        .from(costTransactions)
+        .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, ids)));
+
+      const labourIds = rows.filter((r) => r.sourceType === "labour_allocation").map((r) => r.id);
+      const otherIds = rows.filter((r) => r.sourceType !== "labour_allocation").map((r) => r.id);
+
+      if (otherIds.length > 0) {
+        await tx
+          .update(costTransactions)
+          .set({ approvalStatus: "approved", approvedAt: new Date() })
+          .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, otherIds)));
+      }
+      if (labourIds.length > 0) {
+        await tx
+          .update(costTransactions)
+          .set({ approvalStatus: "posted", approvedAt: new Date() })
+          .where(and(eq(costTransactions.tenantId, tenantId), inArray(costTransactions.id, labourIds)));
+      }
+    });
     revalidatePath(`/t/${tenantId}/approvals`);
+    revalidatePath(`/t/${tenantId}`);
   }
 
   // The actual Xero sync — reuses the exact adapter methods proved out
@@ -62,6 +85,7 @@ export default async function ApprovalsPage({
           id: costTransactions.id,
           amount: costTransactions.amount,
           type: costTransactions.type,
+          sourceType: costTransactions.sourceType,
           costType: costCodes.costType,
           transactionDate: costTransactions.transactionDate,
           vendorName: purchaseOrders.vendorName,
@@ -81,6 +105,13 @@ export default async function ApprovalsPage({
       throw new Error(
         `Refusing to push a "${row.type}" transaction to Xero — only actual (invoiced) cost may sync.`,
       );
+    }
+    if (row.sourceType === "labour_allocation") {
+      // Labour goes "posted" directly on approval (see approveSelected) —
+      // this action should never even see one, but guard anyway: the real
+      // payroll total is already in Xero as one lump sum, there's no
+      // per-job bill to create.
+      throw new Error("Labour allocations don't sync to Xero individually — approving posts them directly.");
     }
 
     const [mapping] = await withTenant(tenantId, null, (tx) =>

@@ -10,7 +10,18 @@ import { tenantIsolationPolicies } from "./rls-helpers";
 // (see cost-codes.ts) is the many-to-one link, joined at posting/
 // reconciliation time rather than a hard FK, since account mappings are
 // set up independently of when cost codes are created.
-export const costType = pgEnum("cost_type", ["materials", "labour", "subcontractor", "plant"]);
+// Addendum 2.J also names "Labour Rate Variance" as one of the default
+// accounts Wayleave sets up — a genuine 5th bucket, not really a "type" of
+// cost the way the other four are (no cost_code is ever tagged with it),
+// but it needs the exact same tenant->Xero-account mapping machinery, so
+// it lives in the same enum/table rather than a parallel one.
+export const costType = pgEnum("cost_type", [
+  "materials",
+  "labour",
+  "subcontractor",
+  "plant",
+  "labour_variance",
+]);
 
 // Addendum 2.J: Wayleave creates a default COS account per cost type during
 // setup if the client's COA has nothing suitable — isWayleaveManaged flags

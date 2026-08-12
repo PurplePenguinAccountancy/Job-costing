@@ -67,6 +67,9 @@ export default async function TenantDashboard({
           <Link href={`/t/${tenantId}/approvals`} className={styles.navLink}>
             Approval queue
           </Link>
+          <Link href={`/t/${tenantId}/labour`} className={styles.navLink}>
+            Labour
+          </Link>
         </div>
       </div>
 
