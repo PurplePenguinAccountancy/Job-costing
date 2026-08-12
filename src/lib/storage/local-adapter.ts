@@ -10,11 +10,7 @@ import type { StorageAdapter } from "./adapter";
  */
 export class LocalFilesystemStorageAdapter implements StorageAdapter {
   readonly provider = "local-filesystem";
-  private readonly root: string;
-
-  constructor(root?: string) {
-    this.root = root ?? process.env.STORAGE_LOCAL_DIR ?? join(process.cwd(), ".data", "documents");
-  }
+  private readonly root = process.env.STORAGE_LOCAL_DIR ?? join(process.cwd(), ".data", "documents");
 
   async store(key: string, content: Buffer): Promise<void> {
     const path = join(this.root, key);

@@ -10,7 +10,7 @@ import {
   jobs,
 } from "@/db/schema";
 import { XeroAdapter } from "@/lib/accounting/xero-adapter";
-import type { JournalLine } from "@/lib/accounting/adapter";
+import type { JournalLine, AccountBalance } from "@/lib/accounting/adapter";
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -489,7 +489,9 @@ export async function getApprovedLabourPeriods(tenantId: string): Promise<Labour
         and(
           eq(costTransactions.tenantId, tenantId),
           eq(costTransactions.sourceType, "labour_allocation"),
-          inArray(costTransactions.approvalStatus, ["draft", "pending_approval", "approved"]),
+          // postLabourPeriod only ever inserts as pending_approval — draft
+          // is never used for this sourceType, so it's excluded here too.
+          inArray(costTransactions.approvalStatus, ["pending_approval", "approved"]),
         ),
       ),
   );
@@ -622,7 +624,7 @@ export async function pushLabourPeriodToXero(
   // journal lines (never live-tested — the custom connection only had
   // manualjournals.read scope as of the last check) can be checked against
   // what actually moved, instead of trusting the implementation blind.
-  let balancesBefore: Awaited<ReturnType<typeof adapter.getAccountBalances>> | null = null;
+  let balancesBefore: AccountBalance[] | null = null;
   try {
     balancesBefore = await adapter.getAccountBalances();
   } catch {
@@ -662,13 +664,18 @@ export async function pushLabourPeriodToXero(
   if (balancesBefore) {
     try {
       const balancesAfter = await adapter.getAccountBalances();
-      const findBalance = (list: typeof balancesAfter, accountId: string | null) =>
+      const findBalance = (list: AccountBalance[], accountId: string | null) =>
         accountId ? (list.find((b) => b.accountId === accountId)?.balance ?? null) : null;
 
       const labourBefore = findBalance(balancesBefore, labourMapping.xeroAccountId);
       const labourAfter = findBalance(balancesAfter, labourMapping.xeroAccountId);
       if (labourBefore !== null && labourAfter !== null) {
         const delta = round2(labourAfter - labourBefore);
+        // A wider tolerance than the exact-penny rounding used elsewhere —
+        // this compares two separately-fetched Trial Balance snapshots, not
+        // Wayleave's own arithmetic, and small YTD movement from unrelated
+        // activity between the two calls shouldn't read as a sign-convention
+        // bug.
         if (Math.abs(delta - totalAllocated) > 0.5) {
           signConventionWarning = `Journal posted (id ${journal.id}), but the Direct Labour account moved by £${delta.toFixed(2)} — expected +£${totalAllocated.toFixed(2)}. Check the journal in Xero: the sign convention may be backwards, or the Trial Balance report hasn't caught up yet.`;
           console.error(`[labour] ${signConventionWarning}`);

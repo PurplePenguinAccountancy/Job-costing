@@ -18,21 +18,20 @@ export type IngestResult = {
   possibleDuplicateOfDocumentId: string | null;
 };
 
-type DuplicateMatch = { id: string; filename: string; createdAt: Date };
-
 /**
  * Duplicate-invoice check (checks both already-posted and still-pending
  * documents — nothing here filters on downstream transaction/approval
  * status, so "processed" and "yet to be processed" invoices are covered by
  * the same query). Two independent signals, either is enough to flag:
  * same vendor+amount+date, or same PO+amount. Both require an extracted
- * amount — there's nothing to compare without one.
+ * amount — there's nothing to compare without one. Returns the earlier
+ * document's id, or null if nothing matches.
  */
-async function findPotentialDuplicate(
+async function findPotentialDuplicateId(
   tx: typeof db,
   tenantId: string,
   extraction: ExtractedInvoice,
-): Promise<DuplicateMatch | null> {
+): Promise<string | null> {
   if (extraction.totalAmount === null) return null;
   const amount = extraction.totalAmount.toFixed(2);
 
@@ -52,12 +51,12 @@ async function findPotentialDuplicate(
   if (signals.length === 0) return null;
 
   const [match] = await tx
-    .select({ id: documents.id, filename: documents.filename, createdAt: documents.createdAt })
+    .select({ id: documents.id })
     .from(documents)
     .where(and(eq(documents.tenantId, tenantId), or(...signals)))
     .orderBy(desc(documents.createdAt))
     .limit(1);
-  return match ?? null;
+  return match?.id ?? null;
 }
 
 /**
@@ -104,7 +103,7 @@ export async function ingestDocument(params: {
   await storage.store(storageKey, params.fileBuffer);
 
   return withTenant(params.tenantId, null, async (tx) => {
-    const duplicateOf = await findPotentialDuplicate(tx, params.tenantId, extraction);
+    const duplicateOfId = await findPotentialDuplicateId(tx, params.tenantId, extraction);
 
     const [doc] = await tx
       .insert(documents)
@@ -120,7 +119,7 @@ export async function ingestDocument(params: {
         extractedAmount: extraction.totalAmount?.toFixed(2),
         extractedInvoiceDate: extraction.invoiceDate,
         extractedConfidence: extraction.confidence.toFixed(3),
-        possibleDuplicateOfDocumentId: duplicateOf?.id ?? null,
+        possibleDuplicateOfDocumentId: duplicateOfId,
         rawExtraction: extraction,
       })
       .returning();
@@ -129,12 +128,12 @@ export async function ingestDocument(params: {
     // clean PO match — it needs a human to confirm this isn't a
     // re-submission first (via the same manual-allocation flow unmatched
     // documents already go through).
-    if (duplicateOf) {
+    if (duplicateOfId) {
       return {
         documentId: doc.id,
         costTransactionId: null,
         matchedPo: false,
-        possibleDuplicateOfDocumentId: duplicateOf.id,
+        possibleDuplicateOfDocumentId: duplicateOfId,
       };
     }
 
