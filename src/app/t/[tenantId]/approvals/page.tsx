@@ -3,7 +3,13 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { withTenant } from "@/db";
 import { costTransactions, costCodes, costTypeAccounts, purchaseOrders, documents } from "@/db/schema";
-import { getPendingReview, getApprovedNotPosted } from "@/db/queries/approvals";
+import {
+  getPendingReview,
+  getApprovedNotPosted,
+  getUnallocatedDocuments,
+  listJobsForAllocation,
+  listCostCodesForAllocation,
+} from "@/db/queries/approvals";
 import { XeroAdapter } from "@/lib/accounting/xero-adapter";
 import styles from "./approvals.module.css";
 
@@ -17,9 +23,12 @@ export default async function ApprovalsPage({
   params: Promise<{ tenantId: string }>;
 }) {
   const { tenantId } = await params;
-  const [pending, approved] = await Promise.all([
+  const [pending, approved, unallocated, allJobs, allCostCodes] = await Promise.all([
     getPendingReview(tenantId),
     getApprovedNotPosted(tenantId),
+    getUnallocatedDocuments(tenantId),
+    listJobsForAllocation(tenantId),
+    listCostCodesForAllocation(tenantId),
   ]);
 
   // Addendum 1.A: a simple, present approval step, with a fast bulk-approve
@@ -113,6 +122,38 @@ export default async function ApprovalsPage({
     );
     revalidatePath(`/t/${tenantId}/approvals`);
     revalidatePath(`/t/${tenantId}`);
+  }
+
+  // Addendum 2.G: no PO match (or nothing usable extracted) doesn't mean
+  // the document disappears — it sits here until a human allocates it
+  // directly. Still always lands in pending_approval afterward, same as
+  // every other entry point (Addendum 1.A).
+  async function manuallyAllocate(formData: FormData) {
+    "use server";
+    const documentId = String(formData.get("documentId"));
+    const jobId = String(formData.get("jobId"));
+    const costCodeId = String(formData.get("costCodeId"));
+    const amount = String(formData.get("amount"));
+    const transactionDate = String(formData.get("transactionDate"));
+
+    if (!jobId || !costCodeId || !amount || !transactionDate) {
+      throw new Error("Job, cost code, amount, and date are all required to allocate a document.");
+    }
+
+    await withTenant(tenantId, null, (tx) =>
+      tx.insert(costTransactions).values({
+        tenantId,
+        jobId,
+        costCodeId,
+        documentId,
+        type: "actual",
+        amount,
+        approvalStatus: "pending_approval",
+        sourceType: "bill",
+        transactionDate,
+      }),
+    );
+    revalidatePath(`/t/${tenantId}/approvals`);
   }
 
   return (
@@ -221,6 +262,86 @@ export default async function ApprovalsPage({
               ))}
             </tbody>
           </table>
+        )}
+      </section>
+
+      <section>
+        <h2>Unmatched documents ({unallocated.length})</h2>
+        <p className={styles.hint}>
+          No PO match, or nothing usable extracted — these never silently disappear (Addendum
+          2.G). Allocate each one to a job and cost code manually.
+        </p>
+        {unallocated.length === 0 ? (
+          <p className={styles.empty}>Nothing waiting on manual allocation.</p>
+        ) : (
+          <div className={styles.unallocatedList}>
+            {unallocated.map((doc) => (
+              <form action={manuallyAllocate} key={doc.id} className={styles.unallocatedCard}>
+                <input type="hidden" name="documentId" value={doc.id} />
+                <div className={styles.unallocatedHeader}>
+                  <strong>{doc.filename}</strong>
+                  <span className={styles.status}>{doc.extractionStatus.replace("_", " ")}</span>
+                </div>
+                <p className={styles.hint}>
+                  Extracted: {doc.extractedVendorName ?? "no vendor"} · PO{" "}
+                  {doc.extractedPoNumber ?? "none"} ·{" "}
+                  {doc.extractedAmount ? formatMoney(doc.extractedAmount) : "no amount"}
+                  {doc.extractedPoNumber && !doc.extractedAmount ? " (PO given but no total extracted)" : ""}
+                  {!doc.extractedPoNumber && doc.extractedAmount ? " (no matching PO found)" : ""}
+                </p>
+                <div className={styles.unallocatedFields}>
+                  <label>
+                    Job
+                    <select name="jobId" required defaultValue="">
+                      <option value="" disabled>
+                        Select a job
+                      </option>
+                      {allJobs.map((j) => (
+                        <option key={j.id} value={j.id}>
+                          {j.code} — {j.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Cost code
+                    <select name="costCodeId" required defaultValue="">
+                      <option value="" disabled>
+                        Select a cost code
+                      </option>
+                      {allCostCodes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Amount
+                    <input
+                      name="amount"
+                      type="number"
+                      step="0.01"
+                      required
+                      defaultValue={doc.extractedAmount ?? ""}
+                    />
+                  </label>
+                  <label>
+                    Date
+                    <input
+                      name="transactionDate"
+                      type="date"
+                      required
+                      defaultValue={doc.extractedInvoiceDate ?? ""}
+                    />
+                  </label>
+                </div>
+                <button type="submit" className={styles.approveButton}>
+                  Allocate
+                </button>
+              </form>
+            ))}
+          </div>
         )}
       </section>
     </div>

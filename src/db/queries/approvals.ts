@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { withTenant } from "@/db";
 import { costTransactions, jobs, costCodes, documents, purchaseOrders } from "@/db/schema";
 
@@ -75,4 +75,63 @@ export function getPendingReview(tenantId: string) {
  */
 export function getApprovedNotPosted(tenantId: string) {
   return fetchRows(tenantId, ["approved"], ["actual"]);
+}
+
+export type UnallocatedDocument = {
+  id: string;
+  filename: string;
+  extractionStatus: string;
+  extractedVendorName: string | null;
+  extractedPoNumber: string | null;
+  extractedAmount: string | null;
+  extractedInvoiceDate: string | null;
+  extractedConfidence: string | null;
+  receivedVia: string;
+};
+
+/**
+ * Documents that produced no cost_transaction — no PO match, or no total
+ * extracted at all (Addendum 2.G: every outcome still lands somewhere a
+ * human can see it, never a silent drop). A human allocates these
+ * manually: picks a job and cost code, confirms/corrects the amount.
+ */
+export function getUnallocatedDocuments(tenantId: string): Promise<UnallocatedDocument[]> {
+  return withTenant(tenantId, null, (tx) =>
+    tx
+      .select({
+        id: documents.id,
+        filename: documents.filename,
+        extractionStatus: documents.extractionStatus,
+        extractedVendorName: documents.extractedVendorName,
+        extractedPoNumber: documents.extractedPoNumber,
+        extractedAmount: documents.extractedAmount,
+        extractedInvoiceDate: documents.extractedInvoiceDate,
+        extractedConfidence: documents.extractedConfidence,
+        receivedVia: documents.receivedVia,
+      })
+      .from(documents)
+      .leftJoin(costTransactions, eq(costTransactions.documentId, documents.id))
+      .where(and(eq(documents.tenantId, tenantId), isNull(costTransactions.id)))
+      .orderBy(desc(documents.createdAt)),
+  );
+}
+
+export function listJobsForAllocation(tenantId: string) {
+  return withTenant(tenantId, null, (tx) =>
+    tx
+      .select({ id: jobs.id, code: jobs.code, name: jobs.name })
+      .from(jobs)
+      .where(eq(jobs.tenantId, tenantId))
+      .orderBy(jobs.code),
+  );
+}
+
+export function listCostCodesForAllocation(tenantId: string) {
+  return withTenant(tenantId, null, (tx) =>
+    tx
+      .select({ id: costCodes.id, code: costCodes.code, name: costCodes.name })
+      .from(costCodes)
+      .where(eq(costCodes.tenantId, tenantId))
+      .orderBy(costCodes.code),
+  );
 }

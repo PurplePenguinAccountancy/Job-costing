@@ -109,7 +109,66 @@
   background: #1e3a8a;
 }
 
+.unallocatedList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.unallocatedCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.unallocatedHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.unallocatedFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.6rem;
+}
+
+.unallocatedFields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.unallocatedFields select,
+.unallocatedFields input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-weight: 400;
+}
+
 @media (prefers-color-scheme: dark) {
+  .unallocatedCard {
+    border-color: #27272a;
+  }
+  .unallocatedFields label {
+    color: #a1a1aa;
+  }
+  .unallocatedFields select,
+  .unallocatedFields input {
+    background: #18181b;
+    border-color: #3f3f46;
+    color: #f4f4f5;
+  }
   .back,
   .hint {
     color: #9ca3af;

@@ -40,6 +40,12 @@
   color: #374151;
 }
 
+.divider {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  text-align: center;
+}
+
 .input,
 .textarea {
   font: inherit;
