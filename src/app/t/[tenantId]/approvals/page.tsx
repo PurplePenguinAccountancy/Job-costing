@@ -161,7 +161,12 @@ export default async function ApprovalsPage({
       <Link href={`/t/${tenantId}`} className={styles.back}>
         ← Dashboard
       </Link>
-      <h1>Cost approval queue</h1>
+      <div className={styles.titleRow}>
+        <h1>Cost approval queue</h1>
+        <Link href={`/t/${tenantId}/allocate/new`} className={styles.navLink}>
+          Split an amount across jobs
+        </Link>
+      </div>
       <p className={styles.hint}>
         Nothing posts to Xero unchecked (Addendum 1.A) — every bill, bank line, or subcontractor
         split passes through here first.

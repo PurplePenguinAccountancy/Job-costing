@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { withTenant } from "@/db";
-import { allocationLines, allocationDefaults, costTransactions } from "@/db/schema";
+import { allocationLines, allocationDefaults, costTransactions, jobs, costCodes } from "@/db/schema";
 import { allocateAmounts } from "@/lib/allocate-amounts";
 
-type SourceContext = "subcontractor_invoice" | "direct_payment" | "material_stock";
-type AllocationType = "percentage" | "fixed_amount" | "time_based";
+export type SourceContext = "subcontractor_invoice" | "direct_payment" | "material_stock";
+export type AllocationType = "percentage" | "fixed_amount" | "time_based";
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -96,6 +96,120 @@ export async function validateAllocationBatch(
     remaining,
     lineCount: lines.length,
   };
+}
+
+export type AllocationBatchLine = {
+  id: string;
+  jobId: string;
+  jobCode: string;
+  jobName: string;
+  costCodeId: string;
+  costCodeName: string;
+  value: string;
+};
+
+export type AllocationBatch = {
+  sourceLineReference: string;
+  sourceContext: SourceContext;
+  allocationType: AllocationType;
+  expectedTotalAmount: number;
+  expectedTotalHours: number | null;
+  documentId: string | null;
+  lines: AllocationBatchLine[];
+  validation: BatchValidation;
+};
+
+/** Full batch detail for the manage/finalize page — null if the reference
+ * doesn't exist (e.g. a stale/mistyped URL). */
+export async function getAllocationBatch(
+  tenantId: string,
+  sourceLineReference: string,
+): Promise<AllocationBatch | null> {
+  const rows = await withTenant(tenantId, null, (tx) =>
+    tx
+      .select({
+        id: allocationLines.id,
+        jobId: allocationLines.jobId,
+        jobCode: jobs.code,
+        jobName: jobs.name,
+        costCodeId: allocationLines.costCodeId,
+        costCodeName: costCodes.name,
+        value: allocationLines.value,
+        allocationType: allocationLines.allocationType,
+        sourceContext: allocationLines.sourceContext,
+        expectedTotalAmount: allocationLines.expectedTotalAmount,
+        expectedTotalHours: allocationLines.expectedTotalHours,
+        documentId: allocationLines.documentId,
+      })
+      .from(allocationLines)
+      .innerJoin(jobs, eq(jobs.id, allocationLines.jobId))
+      .innerJoin(costCodes, eq(costCodes.id, allocationLines.costCodeId))
+      .where(
+        and(
+          eq(allocationLines.tenantId, tenantId),
+          eq(allocationLines.sourceLineReference, sourceLineReference),
+        ),
+      ),
+  );
+
+  if (rows.length === 0) return null;
+
+  const validation = await validateAllocationBatch(tenantId, sourceLineReference);
+
+  return {
+    sourceLineReference,
+    sourceContext: rows[0].sourceContext,
+    allocationType: rows[0].allocationType,
+    expectedTotalAmount: Number(rows[0].expectedTotalAmount),
+    expectedTotalHours: rows[0].expectedTotalHours ? Number(rows[0].expectedTotalHours) : null,
+    documentId: rows[0].documentId,
+    lines: rows.map((r) => ({
+      id: r.id,
+      jobId: r.jobId,
+      jobCode: r.jobCode,
+      jobName: r.jobName,
+      costCodeId: r.costCodeId,
+      costCodeName: r.costCodeName,
+      value: r.value,
+    })),
+    validation,
+  };
+}
+
+/**
+ * Appends one more line to a batch. The batch's shared metadata
+ * (allocationType, expectedTotalAmount/Hours, sourceContext, documentId)
+ * must match whatever the first line already established — enforced by
+ * the caller passing the same values through, not re-derived here.
+ */
+export async function addAllocationLine(
+  tenantId: string,
+  input: {
+    sourceLineReference: string;
+    sourceContext: SourceContext;
+    documentId: string | null;
+    jobId: string;
+    costCodeId: string;
+    allocationType: AllocationType;
+    value: string;
+    expectedTotalAmount: string;
+    expectedTotalHours: string | null;
+  },
+) {
+  await withTenant(tenantId, null, (tx) =>
+    tx.insert(allocationLines).values({
+      tenantId,
+      sourceContext: input.sourceContext,
+      sourceLineReference: input.sourceLineReference,
+      documentId: input.documentId,
+      jobId: input.jobId,
+      costCodeId: input.costCodeId,
+      allocationType: input.allocationType,
+      value: input.value,
+      expectedTotalAmount: input.expectedTotalAmount,
+      expectedTotalHours: input.expectedTotalHours,
+    }),
+  );
 }
 
 /**

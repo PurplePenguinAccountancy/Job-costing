@@ -16,6 +16,28 @@
   margin-top: 0.25rem;
 }
 
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.navLink {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+}
+
+.navLink:hover {
+  background: #dbeafe;
+}
+
 .page h2 {
   font-size: 1.1rem;
   margin-bottom: 0.25rem;
@@ -157,6 +179,14 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  .navLink {
+    background: #172554;
+    border-color: #1e3a8a;
+    color: #93c5fd;
+  }
+  .navLink:hover {
+    background: #1e3a8a;
+  }
   .unallocatedCard {
     border-color: #27272a;
   }
