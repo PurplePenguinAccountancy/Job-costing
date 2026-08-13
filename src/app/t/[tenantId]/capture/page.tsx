@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ingestDocument } from "@/db/queries/capture-pipeline";
+import { ingestDocument, checkInboxForNewInvoices } from "@/db/queries/capture-pipeline";
 import styles from "./capture.module.css";
 
 export default async function CapturePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ tenantId: string }>;
+  searchParams: Promise<{ inboxChecked?: string; messages?: string; attachments?: string }>;
 }) {
   const { tenantId } = await params;
+  const { inboxChecked, messages, attachments } = await searchParams;
 
   async function simulate(formData: FormData) {
     "use server";
@@ -37,18 +40,50 @@ export default async function CapturePage({
     redirect(`/t/${tenantId}/approvals`);
   }
 
+  async function checkInbox() {
+    "use server";
+    const result = await checkInboxForNewInvoices(tenantId);
+    redirect(
+      `/t/${tenantId}/capture?inboxChecked=1&messages=${result.messagesChecked}&attachments=${result.attachmentsIngested}`,
+    );
+  }
+
   return (
     <div className={styles.page}>
       <Link href={`/t/${tenantId}`} className={styles.back}>
         ← Dashboard
       </Link>
+
+      <section>
+        <h1>Check inbox</h1>
+        <p className={styles.hint}>
+          Real inbound email, forwarded through <code>invoices@wayleavejc.co.uk</code> (IMAP
+          polling — dev/pilot stand-in for the real SES route in Addendum 2.N, which needs an AWS
+          account that doesn&apos;t exist yet). Every attachment found goes through the same{" "}
+          <code>ingestDocument</code> pipeline as a manual upload. Single shared test mailbox for
+          now — every attachment is attributed to this tenant.
+        </p>
+        {inboxChecked ? (
+          <p className={styles.hint}>
+            Last check: {messages} message(s) found, {attachments} attachment(s) ingested.
+          </p>
+        ) : null}
+        <form action={checkInbox}>
+          <button type="submit" className={styles.submit}>
+            Check invoices@wayleavejc.co.uk now
+          </button>
+        </form>
+      </section>
+
+      <div className={styles.divider}>— or simulate an incoming document without real email —</div>
+
       <h1>Simulate incoming document</h1>
       <p className={styles.hint}>
-        Dev-only stand-in for real email intake. Upload a real file if Azure Document Intelligence
-        is connected (Addendum 2.G) — otherwise leave it blank and use the text fallback below,
-        which feeds the mock extraction adapter directly: <code>Vendor</code>, <code>PO</code>,{" "}
-        <code>Date</code>, <code>Total</code> as &quot;Key: Value&quot; lines. Try a PO number that
-        doesn&apos;t exist to see the no-match path.
+        Dev-only stand-in for testing extraction without sending a real email. Upload a real file
+        if Azure Document Intelligence is connected (Addendum 2.G) — otherwise leave it blank and
+        use the text fallback below, which feeds the mock extraction adapter directly:{" "}
+        <code>Vendor</code>, <code>PO</code>, <code>Date</code>, <code>Total</code> as &quot;Key:
+        Value&quot; lines. Try a PO number that doesn&apos;t exist to see the no-match path.
       </p>
 
       <form action={simulate} className={styles.form} encType="multipart/form-data">

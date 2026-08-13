@@ -4,6 +4,7 @@ import { db, withTenant } from "@/db";
 import { documents, costTransactions } from "@/db/schema";
 import { getDocumentExtractionAdapter, type ExtractedInvoice } from "@/lib/ocr";
 import { getStorageAdapter } from "@/lib/storage";
+import { fetchUnseenInvoiceEmails } from "@/lib/mail/imap-client";
 import { matchPurchaseOrder } from "./po-matching";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
@@ -171,4 +172,39 @@ export async function ingestDocument(params: {
       possibleDuplicateOfDocumentId: null,
     };
   });
+}
+
+export type InboxCheckResult = {
+  messagesChecked: number;
+  attachmentsIngested: number;
+  ingestResults: IngestResult[];
+};
+
+/**
+ * Dev/pilot email intake — polls the shared IMAP mailbox and feeds every
+ * attachment it finds through the exact same ingestDocument used by the
+ * manual-upload path (see capture/page.tsx). Single-tenant only for now:
+ * there's one shared test mailbox, so the caller supplies which tenant
+ * every attachment belongs to. Per-tenant routing (a dedicated address per
+ * client, or matching by sender) is a real decision for later, once more
+ * than one tenant is actually forwarding invoices in.
+ */
+export async function checkInboxForNewInvoices(tenantId: string): Promise<InboxCheckResult> {
+  const emails = await fetchUnseenInvoiceEmails();
+  const ingestResults: IngestResult[] = [];
+
+  for (const email of emails) {
+    for (const attachment of email.attachments) {
+      const result = await ingestDocument({
+        tenantId,
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        fileBuffer: attachment.content,
+        receivedVia: "email",
+      });
+      ingestResults.push(result);
+    }
+  }
+
+  return { messagesChecked: emails.length, attachmentsIngested: ingestResults.length, ingestResults };
 }
