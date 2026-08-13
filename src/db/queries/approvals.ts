@@ -153,3 +153,17 @@ export function listCostCodesForAllocation(tenantId: string) {
       .orderBy(costCodes.code),
   );
 }
+
+/** A new cost code — client-configurable chart of accounts (Addendum 2.B), rolls up to a Xero account by costType, not 1:1. */
+export async function createCostCode(
+  tenantId: string,
+  input: { code: string; name: string; costType: "materials" | "labour" | "subcontractor" | "plant" | "labour_variance" },
+) {
+  const [costCode] = await withTenant(tenantId, null, (tx) =>
+    tx
+      .insert(costCodes)
+      .values({ tenantId, code: input.code, name: input.name, costType: input.costType })
+      .returning(),
+  );
+  return costCode;
+}

@@ -9,7 +9,9 @@ import {
   getUnallocatedDocuments,
   listJobsForAllocation,
   listCostCodesForAllocation,
+  createCostCode,
 } from "@/db/queries/approvals";
+import { createJob } from "@/db/queries/job-tree";
 import { getApprovedLabourPeriods, pushLabourPeriodToXero } from "@/db/queries/labour";
 import { XeroAdapter } from "@/lib/accounting/xero-adapter";
 import { getStorageAdapter } from "@/lib/storage";
@@ -196,6 +198,34 @@ export default async function ApprovalsPage({
     revalidatePath(`/t/${tenantId}/approvals`);
   }
 
+  // No dedicated job/cost-code management UI exists yet (both are only
+  // ever created in seed.ts today) — these two quick-add forms exist so a
+  // document can be allocated to a job/cost code that doesn't exist yet
+  // without leaving this page.
+  async function createJobAction(formData: FormData) {
+    "use server";
+    const code = String(formData.get("jobCode")).trim();
+    const name = String(formData.get("jobName")).trim();
+    if (!code || !name) throw new Error("Job code and name are both required.");
+    await createJob(tenantId, { code, name });
+    revalidatePath(`/t/${tenantId}/approvals`);
+  }
+
+  async function createCostCodeAction(formData: FormData) {
+    "use server";
+    const code = String(formData.get("costCodeCode")).trim();
+    const name = String(formData.get("costCodeName")).trim();
+    const costType = String(formData.get("costCodeType")) as
+      | "materials"
+      | "labour"
+      | "subcontractor"
+      | "plant"
+      | "labour_variance";
+    if (!code || !name) throw new Error("Cost code and name are both required.");
+    await createCostCode(tenantId, { code, name, costType });
+    revalidatePath(`/t/${tenantId}/approvals`);
+  }
+
   return (
     <div className={styles.page}>
       <Link href={`/t/${tenantId}`} className={styles.back}>
@@ -363,8 +393,32 @@ export default async function ApprovalsPage({
         <h2>Unmatched documents ({unallocated.length})</h2>
         <p className={styles.hint}>
           No PO match, or nothing usable extracted — these never silently disappear (Addendum
-          2.G). Allocate each one to a job and cost code manually.
+          2.G). Allocate each one to a job and cost code manually. Need a job or cost code that
+          doesn&apos;t exist yet? Add it here first.
         </p>
+        <div className={styles.quickAddRow}>
+          <form action={createJobAction} className={styles.quickAddForm}>
+            <input name="jobCode" placeholder="Job code (e.g. WAYLEAVE-TEST)" required />
+            <input name="jobName" placeholder="Job name" required />
+            <button type="submit" className={styles.addButton}>
+              Add job
+            </button>
+          </form>
+          <form action={createCostCodeAction} className={styles.quickAddForm}>
+            <input name="costCodeCode" placeholder="Cost code (e.g. MATERIALS)" required />
+            <input name="costCodeName" placeholder="Cost code name" required />
+            <select name="costCodeType" defaultValue="materials">
+              <option value="materials">Materials</option>
+              <option value="subcontractor">Subcontractor</option>
+              <option value="plant">Plant</option>
+              <option value="labour">Labour</option>
+              <option value="labour_variance">Labour Rate Variance</option>
+            </select>
+            <button type="submit" className={styles.addButton}>
+              Add cost code
+            </button>
+          </form>
+        </div>
         {unallocated.length === 0 ? (
           <p className={styles.empty}>Nothing waiting on manual allocation.</p>
         ) : (

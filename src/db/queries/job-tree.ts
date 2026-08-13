@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import type { db as Db } from "@/db";
+import { withTenant, type db as Db } from "@/db";
+import { jobs } from "@/db/schema";
 
 export type JobTreeRow = {
   id: string;
@@ -9,6 +10,17 @@ export type JobTreeRow = {
   depth: number;
   path: string[];
 };
+
+/** A new job node — a real job like any other, root-level unless parentId is given (brief section 3: no special-casing). */
+export async function createJob(tenantId: string, input: { code: string; name: string; parentId?: string | null }) {
+  const [job] = await withTenant(tenantId, null, (tx) =>
+    tx
+      .insert(jobs)
+      .values({ tenantId, code: input.code, name: input.name, parentId: input.parentId ?? null })
+      .returning(),
+  );
+  return job;
+}
 
 /**
  * All descendants of a job (excluding the job itself), via recursive CTE.
