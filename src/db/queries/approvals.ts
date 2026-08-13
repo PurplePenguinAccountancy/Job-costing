@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { withTenant } from "@/db";
 import { costTransactions, jobs, costCodes, documents, purchaseOrders } from "@/db/schema";
@@ -40,7 +40,11 @@ async function fetchRows(
         sourceType: costTransactions.sourceType,
         approvalStatus: costTransactions.approvalStatus,
         transactionDate: costTransactions.transactionDate,
-        vendorName: purchaseOrders.vendorName,
+        // The matched PO's vendor when there is one; otherwise whatever
+        // OCR extracted directly onto the document (e.g. a manually
+        // allocated document with no PO match) — better than showing
+        // nothing when the vendor is actually known.
+        vendorName: sql<string | null>`coalesce(${purchaseOrders.vendorName}, ${documents.extractedVendorName})`,
         confidence: documents.extractedConfidence,
         extractionStatus: documents.extractionStatus,
         filename: documents.filename,

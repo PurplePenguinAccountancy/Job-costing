@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { withTenant } from "@/db";
 import { costTransactions, costCodes, costTypeAccounts, purchaseOrders, documents } from "@/db/schema";
 import {
@@ -77,7 +77,11 @@ export default async function ApprovalsPage({
           sourceType: costTransactions.sourceType,
           costType: costCodes.costType,
           transactionDate: costTransactions.transactionDate,
-          vendorName: purchaseOrders.vendorName,
+          // Falls back to the document's own extracted vendor when there's
+          // no PO match — otherwise a manually allocated invoice with a
+          // perfectly good known vendor would push to Xero as "Unknown
+          // supplier" instead of its real name.
+          vendorName: sql<string | null>`coalesce(${purchaseOrders.vendorName}, ${documents.extractedVendorName})`,
           filename: documents.filename,
           mimeType: documents.mimeType,
           storageKey: documents.storageKey,
