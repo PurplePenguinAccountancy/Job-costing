@@ -17,7 +17,12 @@ import { appUser } from "./roles";
  * without touching these tables' existing policies.
  */
 export function tenantIsolationPolicies(tenantIdColumn: AnyPgColumn, tableName: string) {
-  const tenantMatch: SQL = sql`${tenantIdColumn} = current_setting('app.current_tenant_id', true)::uuid`;
+  // NULLIF(..., '') before the cast: an empty-string session variable
+  // (e.g. a transiently leaked/unset value under connection reuse) must
+  // fail the match, not throw "invalid input syntax for type uuid" and
+  // 500 the whole query — a malformed session variable should look like
+  // "no tenant selected," never a hard SQL error in a security policy.
+  const tenantMatch: SQL = sql`${tenantIdColumn} = nullif(current_setting('app.current_tenant_id', true), '')::uuid`;
   return [
     pgPolicy(`${tableName}_select_within_tenant`, {
       for: "select",

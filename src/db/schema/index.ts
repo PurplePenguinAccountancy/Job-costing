@@ -1,6 +1,7 @@
 export * from "./roles";
 export * from "./tenants";
 export * from "./users";
+export * from "./auth";
 export * from "./memberships";
 export * from "./jobs";
 export * from "./cost-type-accounts";

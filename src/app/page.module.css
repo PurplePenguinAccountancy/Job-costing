@@ -10,6 +10,34 @@
   gap: 0.75rem;
 }
 
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.signOut {
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  color: #374151;
+  cursor: pointer;
+}
+
+.signOut:hover {
+  background: #f9fafb;
+}
+
+.role {
+  font-weight: 400;
+  color: #9ca3af;
+  font-size: 0.85rem;
+}
+
 .subtitle {
   color: #6b7280;
   margin-bottom: 1.5rem;
@@ -38,6 +66,13 @@
 @media (prefers-color-scheme: dark) {
   .subtitle {
     color: #9ca3af;
+  }
+  .signOut {
+    border-color: #3f3f46;
+    color: #d4d4d8;
+  }
+  .signOut:hover {
+    background: #18181b;
   }
   .tenantList a {
     border-color: #27272a;

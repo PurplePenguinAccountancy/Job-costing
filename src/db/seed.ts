@@ -51,15 +51,46 @@ async function main() {
     .values({ email: "pm@acmecivils.example", name: "Sam Rivera" })
     .returning();
 
+  // A real, working email so the freshly-built email magic-link sign-in
+  // (Addendum 2.M) can actually be tested live, not just as sample data —
+  // matches by email when the real sign-in happens (see auth.ts's session
+  // callback), so this exact row/membership takes effect immediately.
+  const [alex] = await db
+    .insert(users)
+    .values({ email: "Alex@purplepenguinaccountancy.co.uk", name: "Alex Crumpton" })
+    .returning();
+
+  // Second real, working email — the shared IMAP mailbox already wired up
+  // for invoice capture — specifically so the sign-in flow can be verified
+  // live end-to-end (fetch the actual magic-link email via IMAP, follow
+  // it, confirm access) without depending on a human checking their own
+  // inbox and reporting back.
+  const [inboxTester] = await db
+    .insert(users)
+    .values({ email: "invoices@wayleavejc.co.uk", name: "Wayleave Test Inbox" })
+    .returning();
+
   const result = await withTenant(tenantA.id, pm.id, async (tx) => {
     // tenant_memberships is RLS-scoped (unlike tenants/users above), so this
     // insert must happen inside withTenant's session context — its WITH
     // CHECK policy requires tenant_id to match app.current_tenant_id.
-    await tx.insert(tenantMemberships).values({
-      tenantId: tenantA.id,
-      userId: pm.id,
-      role: "editor",
-    });
+    await tx.insert(tenantMemberships).values([
+      {
+        tenantId: tenantA.id,
+        userId: pm.id,
+        role: "editor",
+      },
+      {
+        tenantId: tenantA.id,
+        userId: alex.id,
+        role: "editor",
+      },
+      {
+        tenantId: tenantA.id,
+        userId: inboxTester.id,
+        role: "editor",
+      },
+    ]);
 
     const [region] = await tx
       .insert(jobs)
@@ -261,7 +292,18 @@ async function main() {
   // Capture pipeline proof: ingest a real invoice (real bytes, not a
   // placeholder) matching PO-1042 — proves ingestDocument end-to-end, and
   // that the storage adapter round-trips exactly what was written, since
-  // that's what ultimately gets attached to the Xero bill.
+  // that's what ultimately gets attached to the Xero bill. This checks the
+  // pipeline's mechanics (PO matching, transaction creation, duplicate
+  // detection), not OCR accuracy — that's separately live-verified against
+  // real invoice PDFs via Azure (see CLAUDE.md §18) — so it deliberately
+  // forces the mock adapter even when Azure is configured: the synthetic
+  // "Key: Value" text fixture below isn't a real document Azure's
+  // prebuilt-invoice model can parse (it 415s on text/plain).
+  const savedAzureEndpoint = process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT;
+  const savedAzureKey = process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY;
+  delete process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT;
+  delete process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY;
+
   const invoiceBytes = Buffer.from(
     "Vendor: Northline Cabling Ltd\nPO: PO-1042\nDate: 2026-08-01\nTotal: 500.00",
     "utf-8",
@@ -308,6 +350,9 @@ async function main() {
   if (duplicateResult.possibleDuplicateOfDocumentId !== ingestResult.documentId || duplicateResult.costTransactionId) {
     throw new Error("DUPLICATE DETECTION FAILURE: re-submitted invoice was not flagged, or still filed a transaction");
   }
+
+  if (savedAzureEndpoint) process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = savedAzureEndpoint;
+  if (savedAzureKey) process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY = savedAzureKey;
 
   // Split-allocation proof: validate the batch (expect complete, since the
   // three percentages sum to exactly 100), then finalize it and confirm

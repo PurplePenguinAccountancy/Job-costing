@@ -50,6 +50,20 @@
       "when": 1786555925091,
       "tag": "0006_uneven_glorian",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786698320469,
+      "tag": "0007_heavy_cammi",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786702414016,
+      "tag": "0008_material_rogue",
+      "breakpoints": true
     }
   ]
 }

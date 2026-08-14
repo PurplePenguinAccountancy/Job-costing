@@ -35,29 +35,33 @@ export const tenantMemberships = pgTable(
     // belong to *before* app.current_tenant_id is set (that's what this
     // query is for) — so this policy keys off current_user_id OR the
     // already-selected tenant, unlike every other table which is tenant-only.
+    // NULLIF(..., '') before every cast below: a malformed/empty session
+    // variable must fail the match, not throw "invalid input syntax for
+    // type uuid" and 500 the whole query (see rls-helpers.ts for the same
+    // reasoning, applied there for every other tenant-scoped table).
     pgPolicy("memberships_visible_to_self_or_within_tenant", {
       for: "select",
       to: appUser,
       using: sql`
-        ${table.userId} = current_setting('app.current_user_id', true)::uuid
-        or ${table.tenantId} = current_setting('app.current_tenant_id', true)::uuid
+        ${table.userId} = nullif(current_setting('app.current_user_id', true), '')::uuid
+        or ${table.tenantId} = nullif(current_setting('app.current_tenant_id', true), '')::uuid
       `,
     }),
     pgPolicy("memberships_write_within_tenant", {
       for: "insert",
       to: appUser,
-      withCheck: sql`${table.tenantId} = current_setting('app.current_tenant_id', true)::uuid`,
+      withCheck: sql`${table.tenantId} = nullif(current_setting('app.current_tenant_id', true), '')::uuid`,
     }),
     pgPolicy("memberships_update_within_tenant", {
       for: "update",
       to: appUser,
-      using: sql`${table.tenantId} = current_setting('app.current_tenant_id', true)::uuid`,
-      withCheck: sql`${table.tenantId} = current_setting('app.current_tenant_id', true)::uuid`,
+      using: sql`${table.tenantId} = nullif(current_setting('app.current_tenant_id', true), '')::uuid`,
+      withCheck: sql`${table.tenantId} = nullif(current_setting('app.current_tenant_id', true), '')::uuid`,
     }),
     pgPolicy("memberships_delete_within_tenant", {
       for: "delete",
       to: appUser,
-      using: sql`${table.tenantId} = current_setting('app.current_tenant_id', true)::uuid`,
+      using: sql`${table.tenantId} = nullif(current_setting('app.current_tenant_id', true), '')::uuid`,
     }),
   ],
 ).enableRLS();
