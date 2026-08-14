@@ -53,6 +53,29 @@
   background: #1e3a8a;
 }
 
+.error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.backupDetails {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.backupDetails summary {
+  cursor: pointer;
+}
+
+.backupDetails .form {
+  margin-top: 0.75rem;
+}
+
 @media (prefers-color-scheme: dark) {
   .hint {
     color: #9ca3af;
@@ -61,5 +84,13 @@
     background: #18181b;
     border-color: #3f3f46;
     color: #f4f4f5;
+  }
+  .error {
+    background: #450a0a;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
+  .backupDetails {
+    color: #9ca3af;
   }
 }

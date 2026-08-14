@@ -1,87 +1,101 @@
-import NextAuth from "next-auth";
-import Nodemailer from "next-auth/providers/nodemailer";
-import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { authUsers, authAccounts, authSessions, authVerificationTokens, users } from "@/db/schema";
+import NextAuth, { CredentialsSignin } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import { getUserById, isLockedOut, recordFailedLogin, resetFailedLogins, consumeBackupCode } from "@/db/queries/auth";
+import { verifyTotpCode } from "@/lib/security/totp";
+import { decryptSecret } from "@/lib/security/encryption";
+import { hashBackupCode } from "@/lib/security/backup-codes";
+import { verifyToken } from "@/lib/security/tokens";
+
+class LockedOutError extends CredentialsSignin {
+  code = "locked_out";
+}
+class InvalidCodeError extends CredentialsSignin {
+  code = "invalid_code";
+}
+class ExpiredStepError extends CredentialsSignin {
+  code = "expired_step";
+}
 
 /**
- * Auth.js v5, email magic-link (Addendum 2.M) — no password ever handled by
- * this app. "database" session strategy is required for the email
- * provider's one-time verification tokens, hence the Drizzle adapter and
- * the auth.ts-owned tables in schema/auth.ts (kept separate from the
- * domain `users` table, not reshaped to fit the adapter — see that file's
- * comment).
+ * Password + mandatory TOTP 2FA (explicit security/GDPR priority — email
+ * magic-link was judged a higher risk and removed entirely). The password
+ * step itself happens BEFORE this provider is ever invoked (see
+ * app/signin/page.tsx's server action) — this authorize() only ever sees
+ * the second factor, proven via a short-lived signed "bridge" token that
+ * carries the already-verified userId across from the password page.
+ * Credentials requires JWT sessions (Auth.js does not support the
+ * database session strategy for this provider) — see users.tokenVersion
+ * for how a session still gets a real, immediate revocation path despite
+ * that.
  */
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: DrizzleAdapter(db, {
-    usersTable: authUsers,
-    accountsTable: authAccounts,
-    sessionsTable: authSessions,
-    verificationTokensTable: authVerificationTokens,
-  }),
-  session: { strategy: "database" },
+  session: { strategy: "jwt" },
+  pages: { signIn: "/signin" },
   providers: [
-    Nodemailer({
-      server: {
-        host: process.env.MAIL_SMTP_HOST,
-        port: Number(process.env.MAIL_SMTP_PORT ?? 587),
-        auth: { user: process.env.MAIL_SMTP_USER, pass: process.env.MAIL_SMTP_PASSWORD },
-        // Fail fast rather than hanging for the OS-level TCP timeout —
-        // relevant right now because outbound SMTP (587) is blocked in
-        // this dev environment (confirmed at the raw TCP level, not an
-        // app bug); the fallback below keeps sign-in usable regardless.
-        connectionTimeout: 5000,
+    Credentials({
+      credentials: {
+        bridgeToken: { type: "text" },
+        totpCode: { type: "text" },
+        backupCode: { type: "text" },
       },
-      from: process.env.MAIL_SMTP_FROM,
-      // Real delivery attempted first; if it fails (e.g. the SMTP block
-      // above), log the actual sign-in link instead of hard-failing the
-      // request — dev/pilot only, remove once real delivery is confirmed
-      // working (Resend or similar, per the SMTP-port-blocked finding).
-      async sendVerificationRequest({ identifier, url, provider }) {
-        const { createTransport } = await import("nodemailer");
-        try {
-          const transport = createTransport(provider.server);
-          await transport.sendMail({
-            to: identifier,
-            from: provider.from,
-            subject: "Sign in to Wayleave",
-            text: `Sign in to Wayleave: ${url}`,
-            html: `<p><a href="${url}">Sign in to Wayleave</a></p>`,
-          });
-        } catch (err) {
-          console.warn(
-            `[auth] Could not email the sign-in link to ${identifier} (${err instanceof Error ? err.message : err}). ` +
-              `Link (dev fallback, would normally never be logged): ${url}`,
-          );
+      async authorize(credentials) {
+        const bridgeToken = credentials?.bridgeToken as string | undefined;
+        const totpCode = credentials?.totpCode as string | undefined;
+        const backupCode = credentials?.backupCode as string | undefined;
+        if (!bridgeToken || (!totpCode && !backupCode)) return null;
+
+        const payload = verifyToken<{ userId: string; purpose: string }>(bridgeToken);
+        if (!payload || payload.purpose !== "totp-pending") throw new ExpiredStepError();
+
+        const user = await getUserById(payload.userId);
+        if (!user || !user.totpEnabled || !user.totpSecretEncrypted) return null;
+        if (isLockedOut(user)) throw new LockedOutError();
+
+        const verified = totpCode
+          ? verifyTotpCode(decryptSecret(user.totpSecretEncrypted), totpCode)
+          : await consumeBackupCode(user.id, hashBackupCode(backupCode!));
+
+        if (!verified) {
+          await recordFailedLogin(user.id);
+          throw new InvalidCodeError();
         }
+
+        await resetFailedLogins(user.id);
+        return { id: user.id, email: user.email, name: user.name };
       },
     }),
   ],
-  pages: {
-    signIn: "/signin",
-    verifyRequest: "/signin/check-email",
-  },
   callbacks: {
-    // The adapter's own user.id is internal auth plumbing, not a row
-    // anything else in this app can reference. Resolve (and lazily create)
-    // the matching row in the domain `users` table by email instead, so
-    // session.user.id is what every existing createdBy/ownerId/approvedBy
-    // foreign key already expects — no changes needed anywhere else.
-    async session({ session, user }) {
-      if (!user.email) return session;
-
-      const [existing] = await db.select().from(users).where(eq(users.email, user.email));
-      const domainUser =
-        existing ??
-        (await db
-          .insert(users)
-          .values({ email: user.email, name: user.name ?? user.email.split("@")[0] })
-          .onConflictDoNothing({ target: users.email })
-          .returning())[0] ??
-        (await db.select().from(users).where(eq(users.email, user.email)))[0];
-
-      session.user.id = domainUser.id;
+    async jwt({ token, user }) {
+      if (user) {
+        // Fresh sign-in — pin the tokenVersion in effect right now.
+        const dbUser = await getUserById(user.id!);
+        token.tokenVersion = dbUser?.tokenVersion ?? 0;
+        return token;
+      }
+      // Every subsequent request: re-check against the DB. A bump to
+      // tokenVersion (see revokeAllSessions) invalidates every JWT for
+      // this user immediately — the incident-response lever a pure JWT
+      // strategy doesn't otherwise give you, since there's no server-side
+      // session row to delete.
+      if (token.sub) {
+        const dbUser = await getUserById(token.sub);
+        if (!dbUser || dbUser.tokenVersion !== token.tokenVersion) {
+          token.revoked = true;
+        }
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token.revoked) {
+        // Every existing page in this app already gates on session.user.id
+        // being present, so clearing it here is enough to make a revoked
+        // JWT behave exactly like "signed out" everywhere, with no changes
+        // needed elsewhere.
+        session.user = undefined as never;
+        return session;
+      }
+      if (token.sub) session.user.id = token.sub;
       return session;
     },
   },

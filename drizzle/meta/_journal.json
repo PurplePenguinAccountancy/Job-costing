@@ -64,6 +64,20 @@
       "when": 1786702414016,
       "tag": "0008_material_rogue",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786705689103,
+      "tag": "0009_unique_jackpot",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786705726678,
+      "tag": "0010_robust_purifiers",
+      "breakpoints": true
     }
   ]
 }
