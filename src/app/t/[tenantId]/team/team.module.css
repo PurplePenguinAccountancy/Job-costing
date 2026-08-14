@@ -1,0 +1,182 @@
+.page {
+  padding: 2.5rem 2rem 4rem;
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.back {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.hint {
+  color: #6b7280;
+  font-size: 0.875rem;
+  max-width: 70ch;
+}
+
+.error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th {
+  text-align: left;
+  border-bottom: 2px solid #e5e7eb;
+  padding: 0.5rem 0.6rem;
+  color: #6b7280;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.table td {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 0.5rem 0.6rem;
+  vertical-align: middle;
+}
+
+.actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.inlineForm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.inlineForm input,
+.inlineForm select {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.addButton {
+  background: #374151;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addButton:hover {
+  background: #1f2937;
+}
+
+.smallButton {
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: #374151;
+}
+
+.smallButton:hover {
+  background: #f9fafb;
+}
+
+.smallDangerButton {
+  background: none;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.smallDangerButton:hover {
+  background: #fef2f2;
+}
+
+.statusOk {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.statusWarn {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+@media (prefers-color-scheme: dark) {
+  .back,
+  .hint {
+    color: #9ca3af;
+  }
+  .error {
+    background: #450a0a;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
+  .table th {
+    border-bottom-color: #27272a;
+    color: #a1a1aa;
+  }
+  .table td {
+    border-bottom-color: #1f1f23;
+  }
+  .inlineForm input,
+  .inlineForm select {
+    background: #18181b;
+    border-color: #3f3f46;
+    color: #f4f4f5;
+  }
+  .smallButton {
+    border-color: #3f3f46;
+    color: #d4d4d8;
+  }
+  .smallButton:hover {
+    background: #18181b;
+  }
+  .smallDangerButton {
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
+  .smallDangerButton:hover {
+    background: #450a0a;
+  }
+  .statusOk {
+    background: #052e16;
+    color: #86efac;
+  }
+  .statusWarn {
+    background: #451a03;
+    color: #fcd34d;
+  }
+}

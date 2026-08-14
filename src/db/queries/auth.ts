@@ -151,3 +151,119 @@ export async function verifyPasswordSetupToken(rawToken: string): Promise<{ user
 export async function markSetupTokenUsed(tokenId: string): Promise<void> {
   await db.update(passwordSetupTokens).set({ usedAt: new Date() }).where(eq(passwordSetupTokens.id, tokenId));
 }
+
+// ---------- Tenant team management (Addendum 1.B: tenant-wide editor is the admin role) ----------
+
+export type TenantMember = {
+  membershipId: string;
+  userId: string;
+  email: string;
+  name: string;
+  role: "editor" | "viewer";
+  totpEnabled: boolean;
+  hasPassword: boolean;
+  isLocked: boolean;
+};
+
+// "Locked right now" is resolved here, not left as a raw timestamp for the
+// page component to compare against Date.now() itself — a React server
+// component's render body must stay a pure function of its props/data,
+// and evaluating "now" belongs in the data layer, not render.
+export function listTenantMembers(tenantId: string, actingUserId: string): Promise<TenantMember[]> {
+  return withTenant(tenantId, actingUserId, (tx) =>
+    tx
+      .select({
+        membershipId: tenantMemberships.id,
+        userId: users.id,
+        email: users.email,
+        name: users.name,
+        role: tenantMemberships.role,
+        totpEnabled: users.totpEnabled,
+        hasPassword: sql<boolean>`${users.passwordHash} is not null`,
+        isLocked: sql<boolean>`${users.lockedUntil} is not null and ${users.lockedUntil} > now()`,
+      })
+      .from(tenantMemberships)
+      .innerJoin(users, eq(users.id, tenantMemberships.userId))
+      .where(eq(tenantMemberships.tenantId, tenantId))
+      .orderBy(users.email),
+  );
+}
+
+async function countEditors(tenantId: string, tx: typeof db): Promise<number> {
+  const rows = await tx
+    .select({ id: tenantMemberships.id })
+    .from(tenantMemberships)
+    .where(and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.role, "editor")));
+  return rows.length;
+}
+
+/**
+ * Adds someone to a tenant — finds the user by email or creates one. If
+ * they've never completed account setup (no password yet), returns
+ * needsSetup so the caller can send them a setup link; an existing active
+ * user just gains access to one more tenant with no new credential needed
+ * (users are global, per users.ts).
+ */
+export async function inviteMember(
+  tenantId: string,
+  actingUserId: string,
+  input: { email: string; name?: string; role: "editor" | "viewer" },
+): Promise<{ userId: string; needsSetup: boolean }> {
+  const email = input.email.trim().toLowerCase();
+  let user = await getUserByEmail(email);
+  if (!user) {
+    const [created] = await db
+      .insert(users)
+      .values({ email, name: input.name?.trim() || email.split("@")[0] })
+      .returning();
+    user = created;
+  }
+
+  await withTenant(tenantId, actingUserId, async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(tenantMemberships)
+      .where(and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.userId, user!.id)));
+    if (existing) throw new Error(`${email} is already a member of this tenant.`);
+    await tx.insert(tenantMemberships).values({ tenantId, userId: user!.id, role: input.role });
+  });
+
+  return { userId: user.id, needsSetup: !user.passwordHash };
+}
+
+export async function updateMemberRole(
+  tenantId: string,
+  actingUserId: string,
+  membershipId: string,
+  role: "editor" | "viewer",
+): Promise<void> {
+  await withTenant(tenantId, actingUserId, async (tx) => {
+    const [membership] = await tx
+      .select()
+      .from(tenantMemberships)
+      .where(and(eq(tenantMemberships.id, membershipId), eq(tenantMemberships.tenantId, tenantId)));
+    if (!membership) throw new Error("Membership not found.");
+
+    if (membership.role === "editor" && role === "viewer" && (await countEditors(tenantId, tx)) <= 1) {
+      throw new Error("Can't demote the last editor — promote someone else first, then try again.");
+    }
+
+    await tx.update(tenantMemberships).set({ role }).where(eq(tenantMemberships.id, membershipId));
+  });
+}
+
+export async function removeMember(tenantId: string, actingUserId: string, membershipId: string): Promise<void> {
+  await withTenant(tenantId, actingUserId, async (tx) => {
+    const [membership] = await tx
+      .select()
+      .from(tenantMemberships)
+      .where(and(eq(tenantMemberships.id, membershipId), eq(tenantMemberships.tenantId, tenantId)));
+    if (!membership) throw new Error("Membership not found.");
+
+    if (membership.role === "editor" && (await countEditors(tenantId, tx)) <= 1) {
+      throw new Error("Can't remove the last editor from this tenant.");
+    }
+
+    await tx.delete(tenantMemberships).where(eq(tenantMemberships.id, membershipId));
+  });
+}
