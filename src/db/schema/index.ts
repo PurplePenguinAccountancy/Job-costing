@@ -16,3 +16,5 @@ export * from "./employees";
 export * from "./employee-rates";
 export * from "./labour-time-entries";
 export * from "./labour-settings";
+export * from "./milestones";
+export * from "./billing-settings";

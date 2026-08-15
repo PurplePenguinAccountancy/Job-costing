@@ -105,6 +105,10 @@ async function main() {
         code: "PO-1042",
         name: "PO 1042 - Substation Works",
         ownerId: pm.id,
+        // Set here, at the PO level, deliberately not on SUBSITE-A itself —
+        // proves milestone billing (section 9) resolves a client name from
+        // the nearest ancestor when the leaf job has none of its own.
+        clientName: "Northern Powergrid",
       })
       .returning();
 

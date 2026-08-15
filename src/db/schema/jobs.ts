@@ -36,6 +36,11 @@ export const jobs = pgTable(
     // Manager/PM (Addendum 1.B) — core for all tiers. Nullable: not every
     // job need be assigned on creation.
     ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
+    // Who to bill for this job's milestones (section 9). Nullable and not
+    // inherited via a DB relationship — a leaf job with no clientName of its
+    // own resolves one from the nearest ancestor that has one set, the same
+    // "any node, walk up if unset" spirit as the rest of the job tree.
+    clientName: text("client_name"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

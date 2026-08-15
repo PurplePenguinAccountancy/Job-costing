@@ -55,6 +55,13 @@ export type BillLineItem = {
   amount: number;
 };
 
+export type SalesInvoiceLineItem = {
+  description: string;
+  /** Platform account code — resolved from billing_settings.salesAccountCode. */
+  accountCode: string;
+  amount: number;
+};
+
 export type JournalLine = {
   accountCode: string;
   /** Signed: positive = debit, negative = credit. All lines across a
@@ -98,6 +105,16 @@ export interface AccountingAdapter {
   createCostOfSalesAccount(input: { code: string; name: string }): Promise<Account>;
 
   /**
+   * Revenue/sales accounts in the client's chart of accounts — candidates
+   * for the milestone-billing sales account (billing_settings.salesAccountCode,
+   * section 9). Read-only discovery, same shape as listCostOfSalesAccounts
+   * but for the other side of the P&L; Wayleave doesn't create these itself
+   * (unlike Cost of Sales accounts) since a client's revenue structure is
+   * theirs to define, not something to default on their behalf.
+   */
+  listRevenueAccounts(): Promise<Account[]>;
+
+  /**
    * Every account's YTD net movement, in one call — this is what
    * reconciliation (Addendum 2.C) compares Wayleave's summed job-costing
    * total against, per cost-type account. YTD rather than all-time or
@@ -128,6 +145,21 @@ export interface AccountingAdapter {
     dueDate?: string;
     reference?: string;
     lineItems: BillLineItem[];
+  }): Promise<{ id: string }>;
+
+  /**
+   * Creates a client-facing sales invoice for a completed milestone
+   * (Addendum 2.9/2.K) — always DRAFT, never sent: the client reviews and
+   * sends it themselves, this product never emails an invoice on a
+   * contractor's behalf. Distinct from createBill (ACCPAY/AUTHORISED,
+   * money owed BY the tenant) — this is ACCREC, money owed TO the tenant.
+   */
+  createSalesInvoice(input: {
+    contactId: string;
+    date: string;
+    dueDate?: string;
+    reference?: string;
+    lineItems: SalesInvoiceLineItem[];
   }): Promise<{ id: string }>;
 
   /**

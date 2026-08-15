@@ -8,6 +8,7 @@ import type {
   Contact,
   JournalLine,
   OrganisationSummary,
+  SalesInvoiceLineItem,
 } from "./adapter";
 
 const XERO_CAPABILITIES: AccountingCapabilities = {
@@ -50,6 +51,11 @@ type XeroReportsResponse = { Reports: { Rows: XeroReportRow[] }[] };
 // Direct-Costs-only down to GP (brief section 10), never overhead.
 const COST_OF_SALES_TYPES = new Set(["DIRECTCOSTS"]);
 
+// Xero's current API names this account Type "REVENUE"; older orgs/docs
+// call the same thing "SALES" — accept both rather than guessing which a
+// given org uses.
+const REVENUE_TYPES = new Set(["REVENUE", "SALES"]);
+
 function collectDataRows(rows: XeroReportRow[], out: XeroReportRow[]) {
   for (const row of rows) {
     if (row.RowType === "Row" && row.Cells) out.push(row);
@@ -72,6 +78,18 @@ export class XeroAdapter implements AccountingAdapter {
       `/Accounts?where=${encodeURIComponent('Status=="ACTIVE"')}`,
     );
     return data.Accounts.filter((a) => COST_OF_SALES_TYPES.has(a.Type)).map((a) => ({
+      id: a.AccountID,
+      code: a.Code,
+      name: a.Name,
+      type: a.Type,
+    }));
+  }
+
+  async listRevenueAccounts(): Promise<Account[]> {
+    const data = await xeroRequest<XeroAccountsResponse>(
+      `/Accounts?where=${encodeURIComponent('Status=="ACTIVE"')}`,
+    );
+    return data.Accounts.filter((a) => REVENUE_TYPES.has(a.Type)).map((a) => ({
       id: a.AccountID,
       code: a.Code,
       name: a.Name,
@@ -151,6 +169,39 @@ export class XeroAdapter implements AccountingAdapter {
             // Addendum 1.A: approval already happened in Wayleave before
             // this is ever called — Xero doesn't need a second draft review.
             Status: "AUTHORISED",
+            LineItems: input.lineItems.map((li) => ({
+              Description: li.description,
+              AccountCode: li.accountCode,
+              LineAmount: li.amount,
+            })),
+          },
+        ],
+      }),
+    });
+    return { id: data.Invoices[0].InvoiceID };
+  }
+
+  async createSalesInvoice(input: {
+    contactId: string;
+    date: string;
+    dueDate?: string;
+    reference?: string;
+    lineItems: SalesInvoiceLineItem[];
+  }): Promise<{ id: string }> {
+    const data = await xeroRequest<XeroInvoicesResponse>("/Invoices", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        Invoices: [
+          {
+            Type: "ACCREC",
+            Contact: { ContactID: input.contactId },
+            Date: input.date,
+            DueDate: input.dueDate ?? input.date,
+            Reference: input.reference,
+            // Addendum 2.9: always draft — the client reviews and sends it
+            // themselves, this product never auto-sends a sales invoice.
+            Status: "DRAFT",
             LineItems: input.lineItems.map((li) => ({
               Description: li.description,
               AccountCode: li.accountCode,
