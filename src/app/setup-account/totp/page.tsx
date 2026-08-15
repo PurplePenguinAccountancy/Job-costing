@@ -5,6 +5,7 @@ import { generateTotpSecret, getProvisioningUri, verifyTotpCode } from "@/lib/se
 import { encryptSecret, decryptSecret } from "@/lib/security/encryption";
 import { generateBackupCodes, hashBackupCode } from "@/lib/security/backup-codes";
 import { getUserById, startTotpEnrollment, confirmTotpEnrollment, replaceBackupCodes } from "@/db/queries/auth";
+import { BrandMark } from "@/app/BrandMark";
 import styles from "../../signin/signin.module.css";
 
 export default async function TotpEnrollPage({
@@ -20,6 +21,7 @@ export default async function TotpEnrollPage({
     return (
       <div className={styles.page}>
         <div className={styles.card}>
+          <BrandMark />
           <h1>Link expired</h1>
           <p className={styles.hint}>This setup step expired. Start again from your setup link.</p>
         </div>
@@ -69,6 +71,7 @@ export default async function TotpEnrollPage({
   return (
     <div className={styles.page}>
       <div className={styles.card}>
+        <BrandMark />
         <h1>Set up two-factor authentication</h1>
         <p className={styles.hint}>
           Scan this with Google Authenticator, Authy, or any TOTP app, then enter the 6-digit code it shows.

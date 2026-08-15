@@ -232,9 +232,6 @@ export default async function ApprovalsPage({
 
   return (
     <div className={styles.page}>
-      <Link href={`/t/${tenantId}`} className={styles.back}>
-        ← Dashboard
-      </Link>
       <div className={styles.titleRow}>
         <h1>Cost approval queue</h1>
         <Link href={`/t/${tenantId}/allocate/new`} className={styles.navLink}>

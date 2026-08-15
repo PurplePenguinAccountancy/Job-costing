@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
-import { getMembership } from "@/db/queries/auth";
+import { getMembership, getUserTenants } from "@/db/queries/auth";
+import { AppShell } from "./AppShell";
 
 /**
  * The real access-control gate for every /t/[tenantId] route — both "is
@@ -47,5 +48,12 @@ export default async function TenantLayout({
     );
   }
 
-  return <>{children}</>;
+  const tenants = await getUserTenants(session.user.id);
+  const tenantName = tenants.find((t) => t.id === tenantId)?.name ?? "Tenant";
+
+  return (
+    <AppShell tenantId={tenantId} tenantName={tenantName} role={membership.role} userEmail={session.user.email ?? ""}>
+      {children}
+    </AppShell>
+  );
 }

@@ -1,12 +1,34 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Brand */
+  --brand: #1e40af;
+  --brand-dark: #1e3a8a;
+  --brand-light: #eff6ff;
+  --brand-border: #bfdbfe;
+
+  /* Neutrals */
+  --canvas: #f8fafc;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text-muted: #6b7280;
+  --text-subtle: #9ca3af;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --brand-light: #172554;
+    --brand-border: #1e3a8a;
+
+    --canvas: #101012;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --text-muted: #9ca3af;
+    --text-subtle: #71717a;
   }
 }
 
@@ -26,9 +48,51 @@ body {
   flex-direction: column;
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-weight: 600;
+}
+
+/* Shared brand mark — used on auth-flow pages that each have their own CSS
+   module (signin, setup-account) but need one consistent identity. Plain
+   global classes rather than a CSS module, since it crosses module
+   boundaries by design. */
+.brand-mark-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+  color: var(--text-muted);
 }
 
 * {

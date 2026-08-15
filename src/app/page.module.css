@@ -2,83 +2,104 @@
   padding: 3rem 2rem;
   max-width: 720px;
   margin: 0 auto;
+  min-height: 100dvh;
+  background: var(--canvas);
 }
 
 .main {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
 .titleRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.5rem;
+  margin-bottom: 1.5rem;
 }
 
 .signOut {
   background: none;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 0.35rem 0.7rem;
   font-size: 0.8rem;
-  color: #374151;
+  color: var(--foreground);
   cursor: pointer;
 }
 
 .signOut:hover {
-  background: #f9fafb;
+  background: var(--background);
+}
+
+.pageTitle {
+  margin-bottom: 0.5rem;
+}
+
+.emptyState {
+  color: var(--text-muted);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
 }
 
 .role {
-  font-weight: 400;
-  color: #9ca3af;
-  font-size: 0.85rem;
-}
-
-.subtitle {
-  color: #6b7280;
-  margin-bottom: 1.5rem;
+  font-weight: 600;
+  color: var(--brand);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--brand-light);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
 }
 
 .tenantList {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
 }
 
-.tenantList a {
-  display: block;
-  padding: 0.75rem 1rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  font-weight: 500;
+.tenantCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
-.tenantList a:hover {
-  border-color: #9ca3af;
-  background: #f9fafb;
+.tenantCard:hover {
+  border-color: var(--brand-border);
+  background: var(--brand-light);
 }
 
-@media (prefers-color-scheme: dark) {
-  .subtitle {
-    color: #9ca3af;
-  }
-  .signOut {
-    border-color: #3f3f46;
-    color: #d4d4d8;
-  }
-  .signOut:hover {
-    background: #18181b;
-  }
-  .tenantList a {
-    border-color: #27272a;
-  }
-  .tenantList a:hover {
-    border-color: #52525b;
-    background: #18181b;
-  }
+.tenantCardName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integrations {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.integrationLink {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.integrationLink:hover {
+  color: var(--brand);
 }

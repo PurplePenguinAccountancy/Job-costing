@@ -40,9 +40,6 @@ export default async function BillingPage({
 
   return (
     <div className={styles.page}>
-      <Link href={`/t/${tenantId}`} className={styles.back}>
-        ← Dashboard
-      </Link>
       <div className={styles.titleRow}>
         <h1>Billing / WIP</h1>
       </div>

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { CredentialsSignin } from "next-auth";
 import { signIn } from "@/auth";
+import { BrandMark } from "@/app/BrandMark";
 import styles from "../signin.module.css";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -41,6 +42,7 @@ export default async function TotpPage({
   return (
     <div className={styles.page}>
       <div className={styles.card}>
+        <BrandMark />
         <h1>Enter your code</h1>
         <p className={styles.hint}>Open your authenticator app and enter the 6-digit code.</p>
         {error ? <p className={styles.error}>{ERROR_MESSAGES[error] ?? "Something went wrong."}</p> : null}

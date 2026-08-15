@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { verifyToken } from "@/lib/security/tokens";
+import { BrandMark } from "@/app/BrandMark";
 import styles from "../../signin/signin.module.css";
 
 export default async function BackupCodesPage({
@@ -16,6 +17,7 @@ export default async function BackupCodesPage({
     return (
       <div className={styles.page}>
         <div className={styles.card}>
+          <BrandMark />
           <h1>Link expired</h1>
           <p className={styles.hint}>
             This page can only be shown once, right after setup. If you missed your backup codes, sign in and
@@ -30,6 +32,7 @@ export default async function BackupCodesPage({
   return (
     <div className={styles.page}>
       <div className={styles.card}>
+        <BrandMark />
         <h1>Save your backup codes</h1>
         <p className={styles.hint}>
           Each code works once, if you lose access to your authenticator app. Save these somewhere safe — a
@@ -41,8 +44,9 @@ export default async function BackupCodesPage({
             fontSize: "0.95rem",
             lineHeight: 1.8,
             padding: "1rem",
-            border: "1px solid #d1d5db",
-            borderRadius: "6px",
+            border: "1px solid var(--border-strong)",
+            borderRadius: "8px",
+            background: "var(--canvas)",
           }}
         >
           {payload.codes.join("\n")}

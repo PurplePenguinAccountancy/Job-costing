@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getUserByEmail, isLockedOut, recordFailedLogin, resetFailedLogins } from "@/db/queries/auth";
 import { verifyPassword } from "@/lib/security/password";
 import { signToken } from "@/lib/security/tokens";
+import { BrandMark } from "@/app/BrandMark";
 import styles from "./signin.module.css";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -62,8 +63,9 @@ export default async function SignInPage({
   return (
     <div className={styles.page}>
       <div className={styles.card}>
-        <h1>Wayleave</h1>
-        <p className={styles.hint}>Sign in with your email and password.</p>
+        <BrandMark />
+        <h1>Sign in</h1>
+        <p className={styles.hint}>Enter your email and password to continue.</p>
         {error ? <p className={styles.error}>{ERROR_MESSAGES[error] ?? "Something went wrong."}</p> : null}
         <form action={submitPassword} className={styles.form}>
           <input type="email" name="email" placeholder="you@example.com" required className={styles.input} />

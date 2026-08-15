@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { getUserTenants } from "@/db/queries/auth";
+import { BrandMark } from "./BrandMark";
 import styles from "./page.module.css";
 
 export default async function Home() {
@@ -16,7 +17,7 @@ export default async function Home() {
     <div className={styles.page}>
       <main className={styles.main}>
         <div className={styles.titleRow}>
-          <h1>Wayleave</h1>
+          <BrandMark />
           <form
             action={async () => {
               "use server";
@@ -28,33 +29,31 @@ export default async function Home() {
             </button>
           </form>
         </div>
-        <p className={styles.subtitle}>Construction job costing — internal build preview</p>
 
-        <h2>Your tenants</h2>
+        <h1 className={styles.pageTitle}>Your workspaces</h1>
         {tenants.length === 0 ? (
-          <p>
-            No tenants yet — you&apos;re signed in as {session.user.email}, but it isn&apos;t a
-            member of any tenant. Ask an existing tenant editor to add you, or run{" "}
-            <code>npm run db:seed</code> for sample data.
+          <p className={styles.emptyState}>
+            You&apos;re signed in as {session.user.email}, but you&apos;re not a member of any
+            workspace yet. Ask an existing editor to add you.
           </p>
         ) : (
           <ul className={styles.tenantList}>
             {tenants.map((t) => (
               <li key={t.id}>
-                <Link href={`/t/${t.id}`}>
-                  {t.name} <span className={styles.role}>({t.role})</span>
+                <Link href={`/t/${t.id}`} className={styles.tenantCard}>
+                  <span className={styles.tenantCardName}>{t.name}</span>
+                  <span className={styles.role}>{t.role}</span>
                 </Link>
               </li>
             ))}
           </ul>
         )}
 
-        <h2>Integrations</h2>
-        <ul className={styles.tenantList}>
-          <li>
-            <Link href="/xero">Xero connection status</Link>
-          </li>
-        </ul>
+        <div className={styles.integrations}>
+          <Link href="/xero" className={styles.integrationLink}>
+            Xero connection status
+          </Link>
+        </div>
       </main>
     </div>
   );

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ingestDocument, checkInboxForNewInvoices } from "@/db/queries/capture-pipeline";
 import styles from "./capture.module.css";
@@ -50,10 +49,6 @@ export default async function CapturePage({
 
   return (
     <div className={styles.page}>
-      <Link href={`/t/${tenantId}`} className={styles.back}>
-        ← Dashboard
-      </Link>
-
       <section>
         <h1>Check inbox</h1>
         <p className={styles.hint}>

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Wayleave — Job Costing (dev preview)",
-  description: "Internal build preview — not the product UI",
+  title: "Wayleave — Job Costing",
+  description: "Construction job costing, built for Xero.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

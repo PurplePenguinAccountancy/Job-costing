@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { auth } from "@/auth";
 import { getMembership, listTenantMembers } from "@/db/queries/auth";
 import { inviteAction, changeRoleAction, removeAction, revokeAction } from "./actions";
@@ -31,9 +30,6 @@ export default async function TeamPage({
 
   return (
     <div className={styles.page}>
-      <Link href={`/t/${tenantId}`} className={styles.back}>
-        ← Dashboard
-      </Link>
       <h1>Team</h1>
       <p className={styles.hint}>
         Who has access to this tenant. Editors see and act on everything; viewers are read-only.

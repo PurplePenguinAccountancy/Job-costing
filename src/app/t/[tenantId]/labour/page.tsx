@@ -80,9 +80,6 @@ export default async function LabourPage({
 
   return (
     <div className={styles.page}>
-      <Link href={`/t/${tenantId}`} className={styles.back}>
-        ← Dashboard
-      </Link>
       <div className={styles.titleRow}>
         <h1>Labour</h1>
         <div className={styles.titleActions}>

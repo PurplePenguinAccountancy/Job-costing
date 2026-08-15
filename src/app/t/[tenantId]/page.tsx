@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTenantDashboard } from "@/db/queries/dashboard";
 import { getTenantReconciliation } from "@/db/queries/reconciliation";
@@ -53,29 +52,33 @@ export default async function TenantDashboard({
 
   const problems = reconciliation.filter((r) => r.status !== "balanced");
 
+  // Own-node totals, summed across every job — never double-counted, since
+  // getTenantDashboard's per-row totals are already scoped to that job
+  // alone, not rolled up over descendants.
+  const totalBudget = jobs.reduce((sum, j) => sum + Number(j.budgetTotal), 0);
+  const totalCommitted = jobs.reduce((sum, j) => sum + Number(j.committedTotal), 0);
+  const totalActual = jobs.reduce((sum, j) => sum + Number(j.actualTotal), 0);
+
   return (
     <div className={styles.page}>
-      <Link href="/" className={styles.back}>
-        ← All tenants
-      </Link>
-      <div className={styles.titleRow}>
-        <h1>{tenantName}</h1>
-        <div className={styles.titleActions}>
-          <Link href={`/t/${tenantId}/capture`} className={styles.navLink}>
-            Simulate document
-          </Link>
-          <Link href={`/t/${tenantId}/approvals`} className={styles.navLink}>
-            Approval queue
-          </Link>
-          <Link href={`/t/${tenantId}/labour`} className={styles.navLink}>
-            Labour
-          </Link>
-          <Link href={`/t/${tenantId}/billing`} className={styles.navLink}>
-            Billing / WIP
-          </Link>
-          <Link href={`/t/${tenantId}/team`} className={styles.navLink}>
-            Team
-          </Link>
+      <h1>{tenantName}</h1>
+
+      <div className={styles.statTiles}>
+        <div className={styles.statTile}>
+          <span className={styles.statLabel}>Jobs</span>
+          <span className={styles.statValue}>{jobs.length}</span>
+        </div>
+        <div className={styles.statTile}>
+          <span className={styles.statLabel}>Budget</span>
+          <span className={styles.statValue}>{formatSignedMoney(totalBudget)}</span>
+        </div>
+        <div className={styles.statTile}>
+          <span className={styles.statLabel}>Committed</span>
+          <span className={styles.statValue}>{formatSignedMoney(totalCommitted)}</span>
+        </div>
+        <div className={styles.statTile}>
+          <span className={styles.statLabel}>Actual</span>
+          <span className={styles.statValue}>{formatSignedMoney(totalActual)}</span>
         </div>
       </div>
 

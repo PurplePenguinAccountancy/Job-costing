@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { verifyPasswordSetupToken, markSetupTokenUsed, setUserPassword, getUserById } from "@/db/queries/auth";
 import { hashPassword, validatePasswordStrength, MIN_PASSWORD_LENGTH } from "@/lib/security/password";
 import { signToken } from "@/lib/security/tokens";
+import { BrandMark } from "@/app/BrandMark";
 import styles from "../signin/signin.module.css";
 
 export default async function SetupAccountPage({
@@ -14,6 +15,7 @@ export default async function SetupAccountPage({
     return (
       <div className={styles.page}>
         <div className={styles.card}>
+          <BrandMark />
           <h1>Invalid link</h1>
           <p className={styles.hint}>This setup link is missing its token. Ask for a new one.</p>
         </div>
@@ -26,6 +28,7 @@ export default async function SetupAccountPage({
     return (
       <div className={styles.page}>
         <div className={styles.card}>
+          <BrandMark />
           <h1>Link expired</h1>
           <p className={styles.hint}>
             This setup link has already been used or has expired. Ask whoever invited you for a new one.
@@ -62,6 +65,7 @@ export default async function SetupAccountPage({
   return (
     <div className={styles.page}>
       <div className={styles.card}>
+        <BrandMark />
         <h1>Set your password</h1>
         <p className={styles.hint}>
           {user?.email} — choose a password at least {MIN_PASSWORD_LENGTH} characters long. A long passphrase is
