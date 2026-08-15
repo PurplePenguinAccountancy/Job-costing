@@ -1,7 +1,36 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTenantDashboard } from "@/db/queries/dashboard";
 import { getTenantReconciliation } from "@/db/queries/reconciliation";
 import styles from "./dashboard.module.css";
+
+const GETTING_STARTED = (tenantId: string) => [
+  {
+    href: `/t/${tenantId}/capture`,
+    title: "Capture a document",
+    body: "Upload or simulate an invoice and watch it flow into the approval queue.",
+  },
+  {
+    href: `/t/${tenantId}/approvals`,
+    title: "Review the approval queue",
+    body: "Nothing posts to Xero until someone approves it here first.",
+  },
+  {
+    href: `/t/${tenantId}/labour`,
+    title: "Check labour costing",
+    body: "Employees, rates, and time-entry import for standard-costed labour.",
+  },
+  {
+    href: `/t/${tenantId}/billing`,
+    title: "See Billing / WIP",
+    body: "Cost incurred vs. value billed, and margin alerts, at any level of the job tree.",
+  },
+  {
+    href: `/t/${tenantId}/team`,
+    title: "Manage the team",
+    body: "Invite people, change roles, and see who's set up.",
+  },
+];
 
 function formatSignedMoney(value: number) {
   const abs = Math.abs(value).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
@@ -136,6 +165,19 @@ export default async function TenantDashboard({
           </table>
         </div>
       )}
+
+      <section>
+        <h2>Getting started</h2>
+        <p className={styles.hint}>A few things worth trying, in the order a real job usually flows.</p>
+        <div className={styles.startGrid}>
+          {GETTING_STARTED(tenantId).map((item) => (
+            <Link key={item.href} href={item.href} className={styles.startCard}>
+              <span className={styles.startTitle}>{item.title}</span>
+              <span className={styles.startBody}>{item.body}</span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <section>
         <h2>Job hierarchy</h2>

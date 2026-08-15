@@ -38,6 +38,13 @@ export function AppShell({
           <div className={styles.tenantRole}>{role}</div>
         </div>
 
+        <div
+          className={styles.testBadge}
+          title="Sample data, not a live client account. Xero actions post to a Xero Demo Company, not a real organisation."
+        >
+          Test environment
+        </div>
+
         <nav className={styles.nav}>
           {NAV_ITEMS(tenantId).map((item) => (
             <Link key={item.href} href={item.href} className={styles.navLink}>

@@ -54,6 +54,37 @@
   font-variant-numeric: tabular-nums;
 }
 
+.startGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.startCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 1.1rem;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.startCard:hover {
+  border-color: var(--brand-border);
+  background: var(--brand-light);
+}
+
+.startTitle {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.startBody {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .titleRow {
   display: flex;
   align-items: baseline;
